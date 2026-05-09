@@ -1,0 +1,25 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+
+# Go
+backend/bin/
+coverage.out
+
+# Node / extension build
+node_modules/
+extension/dist/
+*.tsbuildinfo
+
+# Local IDE/editor state
+.idea/
+.vscode/
+
+# Local agent/runtime state
+.agents/
+.codex/
+
