@@ -11,7 +11,7 @@ import (
 )
 
 func TestHealthWithSecretReturns200(t *testing.T) {
-	mux := api.NewRouter(testSecret)
+	mux := api.NewRouter(testSecret, nil)
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	req.Header.Set("X-Local-Secret", testSecret)
 	w := httptest.NewRecorder()
@@ -37,7 +37,7 @@ func TestHealthWithSecretReturns200(t *testing.T) {
 }
 
 func TestHealthWithoutSecretReturns401(t *testing.T) {
-	mux := api.NewRouter(testSecret)
+	mux := api.NewRouter(testSecret, nil)
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	w := httptest.NewRecorder()
 

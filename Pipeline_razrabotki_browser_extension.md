@@ -562,19 +562,19 @@ Backend при `POST /runs/continue` проверяет, что run сущест
 - [x] Build pipeline: `tsc` + `esbuild`.
 - [x] Popup UI: статический «Hello + Health check к localhost backend».
 - [x] Background service worker: пустой, регистрируется.
-- [ ] Установка в Chrome через Developer mode → проверка что popup открывается, health-check проходит.
+- [x] Установка в Chrome через Developer mode → проверка что popup открывается, health-check проходит.
 
 ### Этап 3. Backend ↔ Extension API
-- [ ] `GET /settings` и `PUT /settings` → popup читает/сохраняет `dailyLimit`, `runLimit`, pacing и фильтры; backend валидирует диапазоны.
-- [ ] `POST /runs/start { search_url }` → создаёт `apply_runs`, возвращает `run_id` и settings snapshot.
-- [ ] `POST /runs/stop { run_id, reason }` → завершает/останавливает run.
-- [ ] `POST /runs/continue { run_id }` → переводит run из `paused_*` в `running`; 409 если run не в paused-состоянии.
-- [ ] `POST /candidates { run_id, items: [{vacancy_id, ...}] }` → возвращает `allow: [vacancy_id, ...]` (фильтрует по `processed_vacancies` + remaining daily/run limit).
-- [ ] `POST /attempts/start { run_id, vacancy_id, ... }` → ставит `processed_vacancies.status='attempting'` перед кликом.
-- [ ] `POST /vacancies/result { run_id, vacancy_id, status, vacancy_title, employer_name, vacancy_url, notes }` → финализирует `processed_vacancies` + инкрементит `daily_apply_stats` и `apply_runs`. **Идемпотентность:** повторный вызов с тем же `(run_id, vacancy_id)` и terminal status — ноп (200 без двойного счётчика). Поддерживает флаг `manual_override: true` для ручного разрешения `unknown_after_click` из popup.
-- [ ] `GET /stats/today` → `{applied, skipped, errors, remainingDaily, activeRun}`.
-- [ ] `POST /events/captcha`, `POST /events/login_lost`, `POST /events/error` — пишут в `notifications_outbox`.
-- [ ] Юнит-тесты на handlers с mock storage.
+- [x] `GET /settings` и `PUT /settings` → popup читает/сохраняет `dailyLimit`, `runLimit`, pacing и фильтры; backend валидирует диапазоны.
+- [x] `POST /runs/start { search_url }` → создаёт `apply_runs`, возвращает `run_id` и settings snapshot.
+- [x] `POST /runs/stop { run_id, reason }` → завершает/останавливает run.
+- [x] `POST /runs/continue { run_id }` → переводит run из `paused_*` в `running`; 409 если run не в paused-состоянии.
+- [x] `POST /candidates { run_id, items: [{vacancy_id, ...}] }` → возвращает `allow: [vacancy_id, ...]` (фильтрует по `processed_vacancies` + remaining daily/run limit).
+- [x] `POST /attempts/start { run_id, vacancy_id, ... }` → ставит `processed_vacancies.status='attempting'` перед кликом.
+- [x] `POST /vacancies/result { run_id, vacancy_id, status, vacancy_title, employer_name, vacancy_url, notes }` → финализирует `processed_vacancies` + инкрементит `daily_apply_stats` и `apply_runs`. **Идемпотентность:** повторный вызов с тем же `(run_id, vacancy_id)` и terminal status — ноп (200 без двойного счётчика). Поддерживает флаг `manual_override: true` для ручного разрешения `unknown_after_click` из popup.
+- [x] `GET /stats/today` → `{applied, skipped, errors, remainingDaily, activeRun}`.
+- [x] `POST /events/captcha`, `POST /events/login_lost`, `POST /events/error` — пишут в `notifications_outbox`.
+- [x] Юнит-тесты на handlers с mock storage.
 
 ### Этап 4. Content scripts: чтение выдачи
 - [ ] `selectors.md` — задокументировать селекторы выдачи hh.ru на текущую дату.
@@ -634,11 +634,11 @@ Backend при `POST /runs/continue` проверяет, что run сущест
 
 ### Unit (Go backend)
 - [x] `internal/config` валидация env.
-- [ ] handlers `GET/PUT /settings` — диапазоны лимитов, `pace_min <= pace_max`, default seed.
-- [ ] handlers `POST /runs/start` / `POST /runs/stop` — lifecycle run-сессии.
-- [ ] handlers `POST /candidates` — фильтрация по processed + daily/run лимит.
-- [ ] handlers `POST /attempts/start` — `attempting` не даёт повторно кликнуть вакансию.
-- [ ] handlers `POST /vacancies/result` — запись в `processed_vacancies` + counter инкремент.
+- [x] handlers `GET/PUT /settings` — диапазоны лимитов, `pace_min <= pace_max`, default seed.
+- [x] handlers `POST /runs/start` / `POST /runs/stop` — lifecycle run-сессии.
+- [x] handlers `POST /candidates` — фильтрация по processed + daily/run лимит.
+- [x] handlers `POST /attempts/start` — `attempting` не даёт повторно кликнуть вакансию.
+- [x] handlers `POST /vacancies/result` — запись в `processed_vacancies` + counter инкремент.
 - [ ] `cover_letter_guard` (regex + длина).
 - [ ] Telegram outbox dispatcher (с fake telegram client).
 
@@ -668,7 +668,7 @@ Backend при `POST /runs/continue` проверяет, что run сущест
 ### 15.1 Пограничные случаи, которые нужно явно держать в дизайне
 
 - [ ] **MV3 service worker может заснуть.** Нельзя держать критичное состояние только в памяти background worker. `run_id`, counters, pause reason и settings snapshot живут в backend/Postgres; background после пробуждения восстанавливается через backend.
-- [ ] **Только одна активная вкладка/run.** При `POST /runs/start` backend отклоняет новый run, если уже есть `running/paused_*`. Popup должен показать активный run и дать Stop/Continue.
+- [x] **Только одна активная вкладка/run.** При `POST /runs/start` backend отклоняет новый run, если уже есть `running/paused_*`. Popup должен показать активный run и дать Stop/Continue.
 - [ ] **Пользователь закрыл вкладку или ушёл со страницы.** Extension ставит run в `paused_unknown`/`stopped`, не продолжает клики в другой вкладке без явного Start.
 - [ ] **Одно резюме, автовыбор.** Аккаунт владельца содержит одно (дефолтное) резюме. Если HH всё равно показывает модал выбора резюме — это `manual_action` + chrome notification; расширение не угадывает резюме автоматически.
 - [ ] **Статус после клика неизвестен.** Если был `attempting`, но success не подтверждён из-за navigation error/service worker sleep/tab close, вакансия становится `unknown_after_click` и больше не кликается автоматически. Владелец разрешает статус вручную через popup (§6.5).
@@ -699,6 +699,8 @@ Backend при `POST /runs/continue` проверяет, что run сущест
 6. **Go:** backend использует актуальную стабильную ветку Go; на 2026-05-10 это Go 1.26.
 7. **GitHub remote:** remote уже существует:
    `https://github.com/DenisKhanov/hh-personal-applier.git`. Коммиты и push — только по явному запросу владельца.
+8. **login_lost status:** отдельного `apply_runs.status` для login lost не добавляем. Backend ставит run в `paused_unknown`, а точная причина сохраняется как event/notification kind `login_lost`; popup должен показывать её из event/history state, не из одного только run status.
+9. **unknown_after_click counters:** `unknown_after_click` считается error-category до ручного разрешения владельцем. `manual_override` через `POST /vacancies/result` переводит счётчик из error в applied/skipped идемпотентно.
 
 ---
 
@@ -714,7 +716,7 @@ Backend при `POST /runs/continue` проверяет, что run сущест
 - [ ] При любой ошибке расширения — лучше остановить цикл, чем сделать что-то неожиданное на странице.
 - [ ] Cover letter LLM — только на сервере. Никогда из extension.
 - [ ] Навигация между страницами из background — только `chrome.tabs.update(tabId, {url})`. Не `window.location`, не `chrome.tabs.create`.
-- [ ] `POST /vacancies/result` — идемпотентный. Повторный вызов с тем же `(run_id, vacancy_id)` и terminal-статусом не инкрементирует счётчики второй раз.
-- [ ] `settings_snapshot` в `apply_runs` — лимиты и pacing читаются из snapshot, не из живых `owner_settings`, пока run активен.
+- [x] `POST /vacancies/result` — идемпотентный. Повторный вызов с тем же `(run_id, vacancy_id)` и terminal-статусом не инкрементирует счётчики второй раз.
+- [x] `settings_snapshot` в `apply_runs` — лимиты и pacing читаются из snapshot, не из живых `owner_settings`, пока run активен.
 - [ ] `autoApply=false` — добавлять popup-подтверждение (`CONFIRM_REQUEST` → ответ popup) перед каждым кликом «Откликнуться». Без ответа в течение 5 минут = «Пропустить».
 - [ ] Chrome notifications дублируют Telegram для событий `captcha`, `error`, `login_lost` (§10). Для `cover_letter_approval` и `daily_report` — только Telegram.

@@ -5,9 +5,13 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/adapters/humago"
+
+	"hh-personal-applier/internal/storage"
 )
 
-func NewRouter(secret string) http.Handler {
+func NewRouter(secret string, store storage.Store) http.Handler {
+	installHumaErrorShape()
+
 	mux := http.NewServeMux()
 
 	cfg := huma.DefaultConfig("HH Personal Applier", "0.1.0")
@@ -17,6 +21,9 @@ func NewRouter(secret string) http.Handler {
 	api := humago.New(mux, cfg)
 
 	registerHealth(api)
+	if store != nil {
+		registerStage3(api, store)
+	}
 
 	return SecretMiddleware(secret)(mux)
 }

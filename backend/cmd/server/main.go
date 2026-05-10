@@ -16,6 +16,7 @@ import (
 	"hh-personal-applier/internal/config"
 	"hh-personal-applier/internal/db"
 	"hh-personal-applier/internal/logging"
+	postgresstore "hh-personal-applier/internal/storage/postgres"
 	"hh-personal-applier/migrations"
 )
 
@@ -37,7 +38,7 @@ func main() {
 	}
 	defer database.Close()
 
-	if err := db.RunMigrations(database, migrations.FS); err != nil {
+	if err := db.RunMigrations(cfg.DatabaseDSN, migrations.FS); err != nil {
 		slog.Error("migrations failed", "err", err)
 		os.Exit(1)
 	}
@@ -45,7 +46,7 @@ func main() {
 
 	server := &http.Server{
 		Addr:         cfg.Addr,
-		Handler:      api.NewRouter(cfg.SharedSecret),
+		Handler:      api.NewRouter(cfg.SharedSecret, postgresstore.New(database, cfg.Timezone)),
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  60 * time.Second,

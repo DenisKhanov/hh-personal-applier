@@ -30,7 +30,13 @@ func Connect(dsn string) (*sql.DB, error) {
 	return db, nil
 }
 
-func RunMigrations(database *sql.DB, migrationsFS fs.FS) error {
+func RunMigrations(dsn string, migrationsFS fs.FS) error {
+	database, err := Connect(dsn)
+	if err != nil {
+		return fmt.Errorf("migration db connect: %w", err)
+	}
+	defer database.Close()
+
 	src, err := iofs.New(migrationsFS, ".")
 	if err != nil {
 		return fmt.Errorf("migration source: %w", err)
