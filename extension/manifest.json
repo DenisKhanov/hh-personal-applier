@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "HH Personal Applier",
+  "version": "0.1.0",
+  "description": "Local-only helper for the owner's hh.ru session.",
+  "action": {
+    "default_popup": "popup/index.html",
+    "default_title": "HH Personal Applier"
+  },
+  "background": {
+    "service_worker": "background/index.js",
+    "type": "module"
+  },
+  "permissions": ["activeTab", "scripting", "storage", "notifications"],
+  "host_permissions": ["https://hh.ru/*", "http://127.0.0.1:8080/*"]
+}

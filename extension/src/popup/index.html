@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>HH Personal Applier</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div>
+          <h1>HH Personal Applier</h1>
+          <p>Local backend health</p>
+        </div>
+        <span id="statusBadge" class="status status-idle">Idle</span>
+      </header>
+
+      <section class="panel">
+        <label class="field">
+          <span>Backend URL</span>
+          <input
+            id="backendUrl"
+            name="backendUrl"
+            type="url"
+            autocomplete="off"
+            spellcheck="false"
+            value="http://127.0.0.1:8080"
+          />
+        </label>
+
+        <label class="field">
+          <span>X-Local-Secret</span>
+          <input
+            id="sharedSecret"
+            name="sharedSecret"
+            type="password"
+            autocomplete="off"
+            spellcheck="false"
+            placeholder="32+ characters"
+          />
+        </label>
+
+        <div class="actions">
+          <button id="saveButton" type="button">Save</button>
+          <button id="healthButton" type="button" class="primary">
+            Check
+          </button>
+        </div>
+      </section>
+
+      <p id="message" class="message" aria-live="polite">
+        Configure the local secret, then check the backend.
+      </p>
+    </main>
+    <script type="module" src="./index.js"></script>
+  </body>
+</html>

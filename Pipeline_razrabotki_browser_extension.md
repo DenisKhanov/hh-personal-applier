@@ -10,20 +10,20 @@
 
 ### 0.1 Принципы
 
-- [ ] **Один пользователь, один аккаунт, один браузер.** Нет multi-user, нет SaaS, нет распространения.
+- [x] **Один пользователь, один аккаунт, один браузер.** Нет multi-user, нет SaaS, нет распространения.
 - [ ] **Расширение работает только при активном пользователе.** Никаких фоновых cron-запусков. «Старт» запускается из popup явным кликом владельца, останавливается автоматически или вручную.
 - [ ] **Низкий темп и управляемые лимиты.** 5-15 секунд между откликами с jitter. Дневной лимит и лимит за один запуск задаются владельцем в настройках; дефолты: 100 откликов в день, 25 за один Start. Цель — реальный поиск работы, не массовый спам.
 - [ ] **Любая неожиданность = стоп.** CAPTCHA, изменение DOM, network error, потеря логина, неожиданный модал — расширение останавливается и зовёт пользователя через chrome notification + Telegram.
 - [ ] **Финальное «нет» всегда у пользователя.** Кнопка «Стоп» в popup мгновенно прерывает цикл; настройка «требовать подтверждение каждого отклика» включается одним переключателем.
-- [ ] **Open code (для себя).** Прозрачный исходник, никаких minified-блобов, никаких внешних SDK с непрозрачным поведением.
+- [x] **Open code (для себя).** Прозрачный исходник, никаких minified-блобов, никаких внешних SDK с непрозрачным поведением.
 
 ### 0.2 Красные линии (что проект НЕ делает)
 
-- [ ] **Никакого anti-detection.** Не подменяем `navigator.webdriver`, не рандомизируем fingerprint, не маскируем расширение, не эмулируем мышь под поведенческие паттерны человека для обмана детектора. Расширение работает в обычном Chrome владельца — потому что HH видит реального юзера, иной маскировки не нужно.
-- [ ] **Никакого CAPTCHA solving.** Если HH показал капчу — расширение замирает, шлёт алерт, ждёт пока владелец решит её вручную и нажмёт «Продолжить» в popup.
-- [ ] **Никаких прокси, IP-ротации, headless Chrome, residential proxies, ботнетов.**
-- [ ] **Никакого парсинга чужих данных, чужих аккаунтов, чужих cookies.** Только то, что доступно в DOM текущей вкладки владельца.
-- [ ] **Никакой коммерциализации, продажи как сервиса, выкладывания в Chrome Web Store как публичного продукта.** Личный инструмент, грузится через Developer mode «Загрузить распакованное расширение».
+- [x] **Никакого anti-detection.** Не подменяем `navigator.webdriver`, не рандомизируем fingerprint, не маскируем расширение, не эмулируем мышь под поведенческие паттерны человека для обмана детектора. Расширение работает в обычном Chrome владельца — потому что HH видит реального юзера, иной маскировки не нужно.
+- [x] **Никакого CAPTCHA solving.** Если HH показал капчу — расширение замирает, шлёт алерт, ждёт пока владелец решит её вручную и нажмёт «Продолжить» в popup.
+- [x] **Никаких прокси, IP-ротации, headless Chrome, residential proxies, ботнетов.**
+- [x] **Никакого парсинга чужих данных, чужих аккаунтов, чужих cookies.** Только то, что доступно в DOM текущей вкладки владельца.
+- [x] **Никакой коммерциализации, продажи как сервиса, выкладывания в Chrome Web Store как публичного продукта.** Личный инструмент, грузится через Developer mode «Загрузить распакованное расширение».
 - [ ] **Никаких отправок откликов на вакансии, требующие сопроводительное письмо без явного подтверждения пользователем.** Письмо генерируется LLM, показывается в Telegram, отправляется только после approve.
 
 ---
@@ -96,26 +96,26 @@
 
 ### 2.1 Расширение Chrome
 
-- [ ] **Manifest V3.** Background — service worker (не persistent page).
-- [ ] **TypeScript** + `tsc` + `esbuild` (минимальная сборка, без webpack-комбайна).
-- [ ] **Manifest permissions:** `activeTab`, `scripting`, `storage`, `notifications`. **Host permissions:** минимум `https://hh.ru/*` и `http://127.0.0.1:8080/*`; региональные `https://*.hh.ru/*` добавлять только если владелец реально ими пользуется. Никаких `<all_urls>`.
+- [x] **Manifest V3.** Background — service worker (не persistent page).
+- [x] **TypeScript** + `tsc` + `esbuild` (минимальная сборка, без webpack-комбайна).
+- [x] **Manifest permissions:** `activeTab`, `scripting`, `storage`, `notifications`. **Host permissions:** минимум `https://hh.ru/*` и `http://127.0.0.1:8080/*`; региональные `https://*.hh.ru/*` добавлять только если владелец реально ими пользуется. Никаких `<all_urls>`.
 - [ ] **Storage:** `chrome.storage.local` только для bootstrap/UI cache (`localBackendUrl`, secret, последний settings snapshot). Источник истины для safety-настроек и состояния — Go-бэкенд + Postgres. IndexedDB не используем.
-- [ ] **Никаких внешних JS-зависимостей в runtime extension.** Утилиты пишем сами. Минимальный TS + DOM API.
-- [ ] **Вёрстка popup — vanilla CSS** (~200 строк). UI-фреймворки избыточны.
+- [x] **Никаких внешних JS-зависимостей в runtime extension.** Утилиты пишем сами. Минимальный TS + DOM API.
+- [x] **Вёрстка popup — vanilla CSS** (~200 строк). UI-фреймворки избыточны.
 
 ### 2.2 Local Go backend
 
-- [ ] **Последняя стабильная версия Go** для локального toolchain и зависимостей.
+- [x] **Последняя стабильная версия Go** для локального toolchain и зависимостей.
   На 2026-05-10 актуальная ветка — Go 1.26; `go.mod` фиксирует language
   version `go 1.26`. Не держимся за `hh-auto-apply-agent` и его версию Go.
-- [ ] **`net/http` + huma/v2** для REST (как в frozen-проекте).
-- [ ] **PostgreSQL 16** через Docker Compose, локально на `127.0.0.1:5432`.
-- [ ] **`pgx/v5`** через `database/sql`.
-- [ ] **`golang-migrate`** для миграций.
+- [x] **`net/http` + huma/v2** для REST (как в frozen-проекте).
+- [x] **PostgreSQL 16** через Docker Compose, локально на `127.0.0.1:5432`.
+- [x] **`pgx/v5`** через `database/sql`.
+- [x] **`golang-migrate`** для миграций.
 - [ ] **`gopkg.in/telebot.v3`** для Telegram.
-- [ ] **`slog`** для логов.
-- [ ] **Listen address: строго `127.0.0.1:8080`.** Бэкенд не должен быть доступен извне машины.
-- [ ] **Auth между extension и backend:** простой shared secret, генерируется при первом запуске, кладётся в `chrome.storage.local` и в `.env` бэкенда. Каждый запрос: header `X-Local-Secret`.
+- [x] **`slog`** для логов.
+- [x] **Listen address: строго `127.0.0.1:8080`.** Бэкенд не должен быть доступен извне машины.
+- [x] **Auth между extension и backend:** простой shared secret, генерируется при первом запуске, кладётся в `chrome.storage.local` и в `.env` бэкенда. Каждый запрос: header `X-Local-Secret`.
 
 ### 2.3 LLM (cover letters)
 
@@ -124,10 +124,10 @@
 
 ### 2.4 Что НЕ используется
 
-- [ ] Никакого Next.js, никакого web-фронтенда. Popup расширения — единственный UI.
-- [ ] Никакого Redis.
-- [ ] Никакого OAuth (ни HH, ни своего).
-- [ ] Никакого Docker для production — production это локальный Chrome владельца. Docker нужен только для Postgres.
+- [x] Никакого Next.js, никакого web-фронтенда. Popup расширения — единственный UI.
+- [x] Никакого Redis.
+- [x] Никакого OAuth (ни HH, ни своего).
+- [x] Никакого Docker для production — production это локальный Chrome владельца. Docker нужен только для Postgres.
 
 ---
 
@@ -526,12 +526,12 @@ Backend при `POST /runs/continue` проверяет, что run сущест
 
 ## 11. Логирование и приватность
 
-- [ ] Структурированные логи `slog` в Go-бэкенде. Уровни: `debug` (dev), `info` (default).
+- [x] Структурированные логи `slog` в Go-бэкенде. Уровни: `debug` (dev), `info` (default).
 - [ ] **Никогда не логируем:** `LOCAL_SHARED_SECRET`, `LLM_API_KEY`, `TELEGRAM_BOT_TOKEN`, полный текст cover letter (только длина + первые 80 символов).
 - [ ] **Логируем:** vacancy_id, status переходы, длительность LLM-вызова, статус Telegram outbox, ошибки DOM с timestamp.
-- [ ] Расширение пишет логи в `console.log` в DevTools popup-а; не пересылает их наружу.
-- [ ] Postgres логи — стандартные docker, не пересылаем.
-- [ ] Никакой аналитики, телеметрии, отправки в облако.
+- [x] Расширение пишет логи в `console.log` в DevTools popup-а; не пересылает их наружу.
+- [x] Postgres логи — стандартные docker, не пересылаем.
+- [x] Никакой аналитики, телеметрии, отправки в облако.
 
 ---
 
@@ -558,10 +558,10 @@ Backend при `POST /runs/continue` проверяет, что run сущест
 - [x] Graceful shutdown.
 
 ### Этап 2. Extension skeleton
-- [ ] `manifest.json` MV3 с минимальным набором permissions.
-- [ ] Build pipeline: `tsc` + `esbuild`.
-- [ ] Popup UI: статический «Hello + Health check к localhost backend».
-- [ ] Background service worker: пустой, регистрируется.
+- [x] `manifest.json` MV3 с минимальным набором permissions.
+- [x] Build pipeline: `tsc` + `esbuild`.
+- [x] Popup UI: статический «Hello + Health check к localhost backend».
+- [x] Background service worker: пустой, регистрируется.
 - [ ] Установка в Chrome через Developer mode → проверка что popup открывается, health-check проходит.
 
 ### Этап 3. Backend ↔ Extension API
@@ -633,7 +633,7 @@ Backend при `POST /runs/continue` проверяет, что run сущест
 ## 14. Testing
 
 ### Unit (Go backend)
-- [ ] `internal/config` валидация env.
+- [x] `internal/config` валидация env.
 - [ ] handlers `GET/PUT /settings` — диапазоны лимитов, `pace_min <= pace_max`, default seed.
 - [ ] handlers `POST /runs/start` / `POST /runs/stop` — lifecycle run-сессии.
 - [ ] handlers `POST /candidates` — фильтрация по processed + daily/run лимит.
@@ -673,7 +673,7 @@ Backend при `POST /runs/continue` проверяет, что run сущест
 - [ ] **Одно резюме, автовыбор.** Аккаунт владельца содержит одно (дефолтное) резюме. Если HH всё равно показывает модал выбора резюме — это `manual_action` + chrome notification; расширение не угадывает резюме автоматически.
 - [ ] **Статус после клика неизвестен.** Если был `attempting`, но success не подтверждён из-за navigation error/service worker sleep/tab close, вакансия становится `unknown_after_click` и больше не кликается автоматически. Владелец разрешает статус вручную через popup (§6.5).
 - [ ] **Пагинация — автопереход на следующую страницу.** После исчерпания текущей страницы background инкрементирует параметр `page` в search_url и переходит (§6.3). Если страниц больше нет — run завершается с reason `no_more_vacancies`.
-- [ ] **Только `hh.ru`.** Host permissions: `https://hh.ru/*` и `http://127.0.0.1:8080/*`. Региональные поддомены не включаем. Не расширять до `<all_urls>`.
+- [x] **Только `hh.ru`.** Host permissions: `https://hh.ru/*` и `http://127.0.0.1:8080/*`. Региональные поддомены не включаем. Не расширять до `<all_urls>`.
 - [ ] **LLM privacy.** В Groq отправляется текст вакансии и черновик письма — владелец принимает это явно, настраивая `LLM_API_KEY`. API key только в backend, никогда в extension. Режим «без LLM» не является поддерживаемым режимом: вакансии с обязательным письмом при недоступном LLM → `skipped_cover_letter`.
 - [ ] **Telegram callback race.** Повторный callback «Отправить/Пропустить» должен быть идемпотентным: первый валидный ответ выигрывает, остальные игнорируются.
 
@@ -705,12 +705,12 @@ Backend при `POST /runs/continue` проверяет, что run сущест
 ## 16. Правила для code-agent (краткая выжимка)
 
 - [ ] Phase order строгий: Этап 0 → 1 → 2 → ... → 8. Не начинать N+1 пока N не закрыт.
-- [ ] Не реализовывать ничего из «красных линий» §0.2 — даже если попросят (fingerprint spoof, CAPTCHA solver, прокси, headless evasion).
-- [ ] Не добавлять зависимостей в extension без явного обсуждения. Vanilla TS + DOM, esbuild — всё.
-- [ ] Backend listen — только `127.0.0.1`. Если вдруг где-то появится `0.0.0.0` — это баг.
-- [ ] Все запросы между extension и backend — с `X-Local-Secret` header. Без него backend возвращает 401.
+- [x] Не реализовывать ничего из «красных линий» §0.2 — даже если попросят (fingerprint spoof, CAPTCHA solver, прокси, headless evasion).
+- [x] Не добавлять зависимостей в extension без явного обсуждения. Vanilla TS + DOM, esbuild — всё.
+- [x] Backend listen — только `127.0.0.1`. Если вдруг где-то появится `0.0.0.0` — это баг.
+- [x] Все запросы между extension и backend — с `X-Local-Secret` header. Без него backend возвращает 401.
 - [ ] Не трогать DOM-селекторы напрямую в content script — все селекторы через `shared/selectors.ts`, чтобы при поломке hh.ru-вёрстки чинить в одном месте.
-- [ ] Не комитить `.env` и `LOCAL_SHARED_SECRET`.
+- [x] Не комитить `.env` и `LOCAL_SHARED_SECRET`.
 - [ ] При любой ошибке расширения — лучше остановить цикл, чем сделать что-то неожиданное на странице.
 - [ ] Cover letter LLM — только на сервере. Никогда из extension.
 - [ ] Навигация между страницами из background — только `chrome.tabs.update(tabId, {url})`. Не `window.location`, не `chrome.tabs.create`.
