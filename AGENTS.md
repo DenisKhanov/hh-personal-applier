@@ -48,7 +48,8 @@ Constraints:
 - If something in the pipeline is ambiguous, ask or make the smallest safe
   assumption and document it in the final response.
 - Never revert user changes unless explicitly asked.
-- Target Go 1.23+ in the backend.
+- Target the latest stable Go line in the backend. As of 2026-05-10 this
+  project uses Go 1.26 in `backend/go.mod`.
 - Target ECMAScript 2022 in the extension. TypeScript strict mode.
 
 ## Phase Discipline
@@ -291,5 +292,6 @@ Before final response after code changes:
   authorization does not extend to subsequent commits.
 - Never bypass hooks (`--no-verify`), skip CI, or downgrade dependencies as a
   shortcut around an obstacle. Diagnose the root cause first.
-- A remote repository for this project does not yet exist. Do not initialize
-  one without asking.
+- Remote `origin` already exists:
+  `https://github.com/DenisKhanov/hh-personal-applier.git`. Do not push or
+  open PRs unless the user explicitly asks.

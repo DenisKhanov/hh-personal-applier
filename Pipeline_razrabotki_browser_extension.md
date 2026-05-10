@@ -105,7 +105,9 @@
 
 ### 2.2 Local Go backend
 
-- [ ] **Go 1.23+** (соответствует hh-auto-apply-agent).
+- [ ] **Последняя стабильная версия Go** для локального toolchain и зависимостей.
+  На 2026-05-10 актуальная ветка — Go 1.26; `go.mod` фиксирует language
+  version `go 1.26`. Не держимся за `hh-auto-apply-agent` и его версию Go.
 - [ ] **`net/http` + huma/v2** для REST (как в frozen-проекте).
 - [ ] **PostgreSQL 16** через Docker Compose, локально на `127.0.0.1:5432`.
 - [ ] **`pgx/v5`** через `database/sql`.
@@ -183,7 +185,7 @@ hh-personal-applier/
 CREATE TABLE processed_vacancies (
     vacancy_id TEXT PRIMARY KEY,            -- HH vacancy id из URL
     status TEXT NOT NULL CHECK (status IN (
-        'attempting', 'applied', 'skipped_test', 'skipped_external',
+        'attempting', 'applied', 'skipped', 'skipped_test', 'skipped_external',
         'skipped_archived', 'skipped_already_applied', 'skipped_cover_letter',
         'manual_action', 'unknown_after_click', 'error'
     )),
@@ -196,6 +198,10 @@ CREATE TABLE processed_vacancies (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 ```
+
+`skipped` — ручной skip из popup (`autoApply=false`) или таймаут ожидания
+подтверждения; специализированные `skipped_*` статусы остаются для
+machine-readable причин автоматического пропуска.
 
 Без `user_id`, без `search_direction_id`, без `negotiation_id` (его в UI-режиме нет).
 
@@ -532,22 +538,24 @@ Backend при `POST /runs/continue` проверяет, что run сущест
 ## 12. Реализация по этапам
 
 ### Этап 0. Bootstrap нового проекта
-- [ ] `git init` в `hh-personal-applier/`. Не пушить — пока локальный, обсудить вынос в private GitHub отдельно.
-- [ ] `.gitignore`: `node_modules/`, `extension/dist/`, `backend/bin/`, `.env`, `*.log`.
-- [ ] `README.md` (короткий, как поднять локально).
-- [ ] `AGENTS.md` (правила для code-agent: по аналогии со старым, но отражающие новую парадигму).
-- [ ] `docker-compose.yml` только с Postgres.
-- [ ] `.env.example`.
+- [x] Git-репозиторий и remote уже созданы владельцем. `origin`:
+  `https://github.com/DenisKhanov/hh-personal-applier.git`. Не пушить без
+  явного запроса владельца.
+- [x] `.gitignore`: `node_modules/`, `extension/dist/`, `backend/bin/`, `.env`, `*.log`.
+- [x] `README.md` (короткий, как поднять локально).
+- [x] `AGENTS.md` (правила для code-agent: по аналогии со старым, но отражающие новую парадигму).
+- [x] `docker-compose.yml` только с Postgres.
+- [x] `.env.example`.
 
 ### Этап 1. Backend skeleton
-- [ ] `go.mod`, базовая структура `cmd/server/main.go`.
-- [ ] `internal/config` — загрузка и валидация env (TELEGRAM_*, DATABASE_DSN, LLM_*, LOCAL_SHARED_SECRET >= 32, APP_TIMEZONE, DEFAULT_*/MAX_* лимиты, listen `127.0.0.1:8080` строго).
-- [ ] `internal/logging` — slog адаптер (можно скопировать из frozen).
-- [ ] Postgres connection.
-- [ ] Migrations: `processed_vacancies`, `daily_apply_stats`, `notifications_outbox`, `cover_letters`, `owner_settings`, `apply_runs`. Финальная миграция — seed `owner_settings`: `INSERT INTO owner_settings DEFAULT VALUES ON CONFLICT DO NOTHING`.
-- [ ] Middleware: проверка `X-Local-Secret` header.
-- [ ] `GET /health` → 200.
-- [ ] Graceful shutdown.
+- [x] `go.mod`, базовая структура `cmd/server/main.go`.
+- [x] `internal/config` — загрузка и валидация env (TELEGRAM_*, DATABASE_DSN, LLM_*, LOCAL_SHARED_SECRET >= 32, APP_TIMEZONE, DEFAULT_*/MAX_* лимиты, listen `127.0.0.1:8080` строго).
+- [x] `internal/logging` — slog адаптер (можно скопировать из frozen).
+- [x] Postgres connection.
+- [x] Migrations: `processed_vacancies`, `daily_apply_stats`, `notifications_outbox`, `cover_letters`, `owner_settings`, `apply_runs`. Финальная миграция — seed `owner_settings`: `INSERT INTO owner_settings DEFAULT VALUES ON CONFLICT DO NOTHING`.
+- [x] Middleware: проверка `X-Local-Secret` header.
+- [x] `GET /health` → 200.
+- [x] Graceful shutdown.
 
 ### Этап 2. Extension skeleton
 - [ ] `manifest.json` MV3 с минимальным набором permissions.
@@ -688,6 +696,9 @@ Backend при `POST /runs/continue` проверяет, что run сущест
 3. **Лимиты:** `dailyLimit` default 100, max 200; `runLimit` default 25, max 100. Значения в `owner_settings` и `.env.example`.
 4. **Домены:** только `https://hh.ru/*`. Региональные поддомены не поддерживаются.
 5. **LLM:** текст вакансии отправляется в Groq. Режим «без LLM» — не поддерживается; при недоступности LLM вакансии с письмом → `skipped_cover_letter`.
+6. **Go:** backend использует актуальную стабильную ветку Go; на 2026-05-10 это Go 1.26.
+7. **GitHub remote:** remote уже существует:
+   `https://github.com/DenisKhanov/hh-personal-applier.git`. Коммиты и push — только по явному запросу владельца.
 
 ---
 

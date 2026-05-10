@@ -155,9 +155,9 @@ MCP servers:
 
 ## 10. Git And Repo Specifics
 
-- A remote repository for this project does not yet exist. Do not run
-  `git init` or create a remote without explicit instruction.
-- When created, the default branch will be `main`.
+- Remote `origin` already exists:
+  `https://github.com/DenisKhanov/hh-personal-applier.git`.
+- The default branch is `main`.
 - Do not commit, push, or create PRs unless the user explicitly asks. One
   authorization does not extend to subsequent commits — reconfirm.
 - For destructive or hard-to-reverse actions (`git reset --hard`, force push,

@@ -26,7 +26,7 @@
 - Chrome Extension Manifest V3.
 - TypeScript, `tsc`, `esbuild`.
 - Vanilla popup HTML/CSS/TS без UI-фреймворков.
-- Go 1.23+.
+- Latest stable Go line; currently Go 1.26 in `backend/go.mod`.
 - `net/http` + `huma/v2`.
 - PostgreSQL 16.
 - `golang-migrate`.
@@ -96,6 +96,9 @@ Backend обязан слушать только `127.0.0.1:8080`. Все зап
 - [`CLAUDE.md`](CLAUDE.md)
 
 Если документы конфликтуют, pipeline выигрывает. README — только обзор.
+
+GitHub remote уже создан: `https://github.com/DenisKhanov/hh-personal-applier.git`.
+Коммиты и push выполняются только по явному запросу владельца.
 
 ## Текущий статус
 
