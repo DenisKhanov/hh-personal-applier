@@ -34,6 +34,8 @@ await mkdir(join(dist, "popup"), { recursive: true });
 await Promise.all([
   copyFile(join(root, "manifest.json"), join(dist, "manifest.json")),
   copyFile(join(root, "src/popup/index.html"), join(dist, "popup/index.html")),
+  copyFile(join(root, "src/popup/icon.png"), join(dist, "popup/icon.png")),
+  copyFile(join(root, "src/popup/icon.svg"), join(dist, "popup/icon.svg")),
   copyFile(join(root, "src/popup/style.css"), join(dist, "popup/style.css"))
 ]);
 
@@ -41,6 +43,7 @@ await run(process.execPath, [
   esbuildCli,
   join(root, "src/background/index.ts"),
   join(root, "src/content/search.ts"),
+  join(root, "src/content/vacancy.ts"),
   join(root, "src/popup/index.ts"),
   "--bundle",
   `--outdir=${dist}`,

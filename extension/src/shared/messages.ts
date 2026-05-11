@@ -1,6 +1,11 @@
-import type { CandidateItem } from "./api";
+import type { CandidateItem, VacancyResultStatus } from "./api";
 
 export const SEARCH_CANDIDATES_PARSED = "HH_SEARCH_CANDIDATES_PARSED";
+export const SEARCH_PARSE_REQUEST = "HH_SEARCH_PARSE_REQUEST";
+export const POPUP_START_RUN = "HH_POPUP_START_RUN";
+export const POPUP_STOP_RUN = "HH_POPUP_STOP_RUN";
+export const POPUP_GET_STATUS = "HH_POPUP_GET_STATUS";
+export const VACANCY_APPLY_SIMPLE_REQUEST = "HH_VACANCY_APPLY_SIMPLE_REQUEST";
 
 export interface SearchCandidatesParsedMessage {
   type: typeof SEARCH_CANDIDATES_PARSED;
@@ -9,7 +14,62 @@ export interface SearchCandidatesParsedMessage {
   candidates: CandidateItem[];
 }
 
-export type ExtensionMessage = SearchCandidatesParsedMessage;
+export interface SearchParseRequestMessage {
+  type: typeof SEARCH_PARSE_REQUEST;
+}
+
+export interface SearchParseResponseMessage {
+  pageUrl: string;
+  parsedAt: string;
+  candidates: CandidateItem[];
+}
+
+export interface PopupStartRunMessage {
+  type: typeof POPUP_START_RUN;
+}
+
+export interface PopupStopRunMessage {
+  type: typeof POPUP_STOP_RUN;
+}
+
+export interface PopupGetStatusMessage {
+  type: typeof POPUP_GET_STATUS;
+}
+
+export interface VacancyApplySimpleRequestMessage {
+  type: typeof VACANCY_APPLY_SIMPLE_REQUEST;
+  runId: string;
+  vacancyId: string;
+}
+
+export type VacancyApplySimpleResponse =
+  | {
+      ok: true;
+      status: VacancyResultStatus;
+      vacancyTitle: string;
+      employerName: string;
+      notes?: string;
+    }
+  | {
+      ok: false;
+      safety:
+        | "captcha"
+        | "login_lost"
+        | "dom_mismatch"
+        | "unknown_modal";
+      vacancyTitle: string;
+      employerName: string;
+      message: string;
+      details?: Record<string, unknown>;
+    };
+
+export type ExtensionMessage =
+  | SearchCandidatesParsedMessage
+  | SearchParseRequestMessage
+  | PopupStartRunMessage
+  | PopupStopRunMessage
+  | PopupGetStatusMessage
+  | VacancyApplySimpleRequestMessage;
 
 export function isSearchCandidatesParsedMessage(
   message: unknown
@@ -24,5 +84,52 @@ export function isSearchCandidatesParsedMessage(
     typeof value.pageUrl === "string" &&
     typeof value.parsedAt === "string" &&
     Array.isArray(value.candidates)
+  );
+}
+
+export function isSearchParseRequestMessage(
+  message: unknown
+): message is SearchParseRequestMessage {
+  return hasType(message, SEARCH_PARSE_REQUEST);
+}
+
+export function isPopupStartRunMessage(
+  message: unknown
+): message is PopupStartRunMessage {
+  return hasType(message, POPUP_START_RUN);
+}
+
+export function isPopupStopRunMessage(
+  message: unknown
+): message is PopupStopRunMessage {
+  return hasType(message, POPUP_STOP_RUN);
+}
+
+export function isPopupGetStatusMessage(
+  message: unknown
+): message is PopupGetStatusMessage {
+  return hasType(message, POPUP_GET_STATUS);
+}
+
+export function isVacancyApplySimpleRequestMessage(
+  message: unknown
+): message is VacancyApplySimpleRequestMessage {
+  if (typeof message !== "object" || message === null) {
+    return false;
+  }
+
+  const value = message as Partial<VacancyApplySimpleRequestMessage>;
+  return (
+    value.type === VACANCY_APPLY_SIMPLE_REQUEST &&
+    typeof value.runId === "string" &&
+    typeof value.vacancyId === "string"
+  );
+}
+
+function hasType(message: unknown, type: string): boolean {
+  return (
+    typeof message === "object" &&
+    message !== null &&
+    (message as { type?: unknown }).type === type
   );
 }

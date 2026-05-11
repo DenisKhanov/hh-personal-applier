@@ -16,6 +16,11 @@
       "matches": ["https://hh.ru/search/vacancy*"],
       "js": ["content/search.js"],
       "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://hh.ru/vacancy/*"],
+      "js": ["content/vacancy.js"],
+      "run_at": "document_idle"
     }
   ],
   "permissions": ["activeTab", "scripting", "storage", "notifications"],

@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="ru">
+  <body>
+    <main data-qa="main-content">
+      <h1 data-qa="vacancy-title">Go Backend Developer</h1>
+      <a data-qa="vacancy-company-name" href="/employer/10">Acme Tech</a>
+      <a data-qa="vacancy-response-link-top" href="/applicant/vacancy_response?vacancyId=123456789">
+        Откликнуться
+      </a>
+      <div role="dialog" data-qa="vacancy-response-popup">
+        <div data-qa="vacancy-response-popup-resume">
+          <button type="button">Backend Developer Resume</button>
+        </div>
+        <label for="letter">Сопроводительное письмо</label>
+        <textarea id="letter" data-qa="vacancy-response-popup-form-letter-input"></textarea>
+        <button type="button" data-qa="vacancy-response-submit-popup">
+          Откликнуться
+        </button>
+      </div>
+    </main>
+  </body>
+</html>

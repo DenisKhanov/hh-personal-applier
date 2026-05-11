@@ -6,3 +6,12 @@ export function isHhSearchVacancyUrl(rawUrl: string): boolean {
     return false;
   }
 }
+
+export function isHhVacancyUrl(rawUrl: string): boolean {
+  try {
+    const url = new URL(rawUrl);
+    return url.hostname === "hh.ru" && /^\/vacancy\/\d+\/?$/.test(url.pathname);
+  } catch {
+    return false;
+  }
+}

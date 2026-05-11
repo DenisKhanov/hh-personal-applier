@@ -91,6 +91,27 @@ p {
   background: var(--panel);
 }
 
+.run-panel {
+  margin-top: 10px;
+}
+
+.run-header {
+  margin-bottom: 10px;
+}
+
+h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 760;
+  letter-spacing: 0;
+}
+
+.run-header p {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .field {
   display: grid;
   gap: 6px;
@@ -154,6 +175,16 @@ button:disabled {
 
 .primary:hover {
   background: var(--accent-strong);
+}
+
+.danger {
+  border-color: var(--danger);
+  background: #fff7f7;
+  color: var(--danger);
+}
+
+.danger:hover {
+  background: #ffecec;
 }
 
 .message {

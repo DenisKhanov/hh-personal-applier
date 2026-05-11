@@ -595,14 +595,22 @@ Backend при `POST /runs/continue` проверяет, что run сущест
 - [x] Manual dry-run smoke в Chrome владельца: обновлённый `extension/dist` загружен, parser видит карточки на `https://hh.ru/search/vacancy*`, backend получает `/runs/start` и `/candidates`, allow/reject сверены без кликов.
 
 ### Этап 5. Auto-apply без писем
-- [ ] `content/vacancy.ts`: при загрузке `https://hh.ru/vacancy/*` (и подтверждённых региональных hosts, если нужны) детектит и кликает «Откликнуться» (только если кнопка простая, без модала-письма).
-- [ ] Pacing 6-14s между переходами.
-- [ ] Детекция success state.
-- [ ] `POST /attempts/start` строго перед кликом, чтобы crash после клика не привёл к повторному авто-клику.
-- [ ] `POST /vacancies/result` после успеха или понятного skip/manual_action.
-- [ ] Safety stops: CAPTCHA, login_lost, unknown modal, DOM mismatch.
-- [ ] Кнопка Stop в popup мгновенно отменяет цикл.
-- [ ] Тест-кейс: 5 вакансий без писем подряд, без падений.
+- [x] Acceptance checklist составлен перед реализацией Stage 5.
+- [x] Popup Start запускает цикл только если активная вкладка `https://hh.ru/search/vacancy*`.
+- [x] Popup Stop синхронно ставит локальный abort и вызывает `POST /runs/stop`.
+- [x] `content/search.ts` умеет отдавать текущие candidates по запросу background, без кликов.
+- [x] `content/vacancy.ts` подключён только к `https://hh.ru/vacancy/*`.
+- [x] `content/vacancy.ts` детектит CAPTCHA, login lost, DOM mismatch, unknown modal и возвращает safety outcome.
+- [x] `content/vacancy.ts` кликает `Откликнуться` только по команде background и только для простой кнопки.
+- [x] Pacing 6-14s между двумя последовательными кликами; задержка живёт в background.
+- [x] Детекция success state после клика.
+- [x] `POST /attempts/start` строго перед кликом, чтобы crash после клика не привёл к повторному авто-клику.
+- [x] `POST /vacancies/result` после успеха или понятного skip/manual_action.
+- [x] Safety stops записываются через `/events/captcha`, `/events/login_lost`, `/events/error` и локальную `chrome.notifications`.
+- [x] **Без Stage 6/7:** не добавлены Telegram dispatcher, LLM, cover-letter generation/approval.
+- [x] **Без пагинации:** Stage 5 обрабатывает только candidates текущей выдачи.
+- [x] Verification: `go vet ./...`, `go test ./...`, `npm test`, `npm run typecheck`, `npm run lint`, `npm run build`.
+- [ ] Manual smoke: 5 вакансий без писем подряд, Stop во время pacing, CAPTCHA/login-lost simulated path, без превышения limits.
 
 ### Этап 6. Telegram outbox
 - [ ] `internal/telegram` адаптер (telebot.v3).
