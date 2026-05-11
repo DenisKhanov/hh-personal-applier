@@ -30,6 +30,14 @@ export default [
     }
   },
   {
+    files: ["test/**/*.ts"],
+    languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: "module",
+      globals: nodeGlobals
+    }
+  },
+  {
     files: ["*.mjs"],
     languageOptions: {
       ecmaVersion: 2022,

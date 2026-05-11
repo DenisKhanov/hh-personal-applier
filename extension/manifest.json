@@ -11,6 +11,13 @@
     "service_worker": "background/index.js",
     "type": "module"
   },
+  "content_scripts": [
+    {
+      "matches": ["https://hh.ru/search/vacancy*"],
+      "js": ["content/search.js"],
+      "run_at": "document_idle"
+    }
+  ],
   "permissions": ["activeTab", "scripting", "storage", "notifications"],
   "host_permissions": ["https://hh.ru/*", "http://127.0.0.1:8080/*"]
 }

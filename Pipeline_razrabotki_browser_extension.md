@@ -577,10 +577,22 @@ Backend при `POST /runs/continue` проверяет, что run сущест
 - [x] Юнит-тесты на handlers с mock storage.
 
 ### Этап 4. Content scripts: чтение выдачи
-- [ ] `selectors.md` — задокументировать селекторы выдачи hh.ru на текущую дату.
-- [ ] `content/search.ts`: при загрузке `https://hh.ru/search/vacancy*` (и подтверждённых региональных hosts, если нужны) парсит карточки и шлёт в background.
-- [ ] Background: `POST /runs/start`, затем запрос `POST /candidates`, получает allow-list, логирует в DevTools popup.
-- [ ] **Без кликов**, только чтение и фильтрация.
+- [x] Acceptance checklist составлен перед реализацией Stage 4.
+- [x] `extension/src/shared/selectors.ts` содержит все DOM-селекторы выдачи; content script не держит селекторы inline.
+- [x] `docs/selectors.md` задокументировал селекторы выдачи `hh.ru/search/vacancy*` на текущую дату и источник проверки.
+- [x] Чистый DOM parser вынесен отдельно от Chrome API.
+- [x] Sanitized HTML fixtures добавлены для unit-тестов parser.
+- [x] Unit-тесты parser покрывают `vacancyId`, `title`, `employerName`, `vacancyUrl`, `hasTest`, `isExternal`, `isArchived`, `requiresLetter`.
+- [x] `content/search.ts` при загрузке `https://hh.ru/search/vacancy*` парсит текущий DOM и отправляет результат в background.
+- [x] `manifest.json` подключает content script только для `https://hh.ru/search/vacancy*`.
+- [x] `extension/build.mjs` собирает content script в `dist/content/search.js`.
+- [x] Background принимает parsed candidates от content script.
+- [x] Background стартует dry-run через `POST /runs/start`.
+- [x] Background отправляет candidates в backend через `POST /candidates`.
+- [x] Background логирует allow/reject в DevTools.
+- [x] **Без Stage 5:** не добавлены `content/vacancy.ts`, переходы по страницам, `attempts/start`, клики или auto-apply.
+- [x] Verification: `go vet ./...`, `go test ./...`, `npm run typecheck`, `npm run lint`, `npm run build`.
+- [x] Manual dry-run smoke в Chrome владельца: обновлённый `extension/dist` загружен, parser видит карточки на `https://hh.ru/search/vacancy*`, backend получает `/runs/start` и `/candidates`, allow/reject сверены без кликов.
 
 ### Этап 5. Auto-apply без писем
 - [ ] `content/vacancy.ts`: при загрузке `https://hh.ru/vacancy/*` (и подтверждённых региональных hosts, если нужны) детектит и кликает «Откликнуться» (только если кнопка простая, без модала-письма).

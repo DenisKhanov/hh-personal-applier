@@ -28,6 +28,7 @@ function run(command, args) {
 
 await rm(dist, { force: true, recursive: true });
 await mkdir(join(dist, "background"), { recursive: true });
+await mkdir(join(dist, "content"), { recursive: true });
 await mkdir(join(dist, "popup"), { recursive: true });
 
 await Promise.all([
@@ -39,6 +40,7 @@ await Promise.all([
 await run(process.execPath, [
   esbuildCli,
   join(root, "src/background/index.ts"),
+  join(root, "src/content/search.ts"),
   join(root, "src/popup/index.ts"),
   "--bundle",
   `--outdir=${dist}`,
