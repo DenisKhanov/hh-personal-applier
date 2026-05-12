@@ -4,6 +4,8 @@ Behavioral guidelines to reduce common LLM coding mistakes. Merge with project-s
 
 **Tradeoff:** These guidelines bias toward caution over speed. For trivial tasks, use judgment.
 
+Используй плагин Superpowers перед тем как приступить к задаче
+
 ## 1. Think Before Coding
 
 **Don't assume. Don't hide confusion. Surface tradeoffs.**
@@ -176,5 +178,5 @@ MCP servers:
   was not run, rather than claiming success.
 - Automated browser tests against `hh.ru` are forbidden (red line in
   `AGENTS.md`). Smoke against hh.ru is manual, owner-driven only.
-- Call `advisor()` before committing to a non-trivial implementation approach
+- Call, if actual model not opus 4.7, `advisor()` before committing to a non-trivial implementation approach
   and before declaring complex work complete.

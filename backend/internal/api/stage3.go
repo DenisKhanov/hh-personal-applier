@@ -89,6 +89,10 @@ type eventOutput struct {
 	}
 }
 
+type notificationQueueOutput struct {
+	Body storage.NotificationQueueResult
+}
+
 func registerStage3(api huma.API, store storage.Store) {
 	huma.Register(api, huma.Operation{
 		OperationID: "get-settings",
@@ -260,6 +264,20 @@ func registerStage3(api huma.API, store storage.Store) {
 	registerEvent(api, store, storage.EventKindCaptcha, "/events/captcha", "record-captcha-event")
 	registerEvent(api, store, storage.EventKindLoginLost, "/events/login_lost", "record-login-lost-event")
 	registerEvent(api, store, storage.EventKindError, "/events/error", "record-error-event")
+
+	huma.Register(api, huma.Operation{
+		OperationID: "queue-telegram-test",
+		Method:      http.MethodPost,
+		Path:        "/telegram/test",
+		Summary:     "Queue a Telegram test greeting",
+		Tags:        []string{"telegram"},
+	}, func(ctx context.Context, _ *emptyInput) (*notificationQueueOutput, error) {
+		result, err := store.QueueTelegramTest(ctx)
+		if err != nil {
+			return nil, apiError(err)
+		}
+		return &notificationQueueOutput{Body: result}, nil
+	})
 }
 
 func registerEvent(api huma.API, store storage.Store, kind storage.EventKind, path string, operationID string) {

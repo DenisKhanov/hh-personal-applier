@@ -162,6 +162,46 @@ func TestCandidatesHandlerRejectsNonRunningRun(t *testing.T) {
 	assertErrorCode(t, response, "run_not_running")
 }
 
+func TestCandidatesHandlerAllowsAttemptingVacancies(t *testing.T) {
+	store := newFakeStore()
+	store.activeRun = &storage.Run{
+		ID:               "run-2",
+		Status:           storage.RunStatusRunning,
+		SettingsSnapshot: store.settings,
+	}
+	store.processed["1"] = storage.ProcessedStatusAttempting
+	store.processed["2"] = storage.ProcessedStatusApplied
+	mux := api.NewRouter(testSecret, store)
+
+	response := doJSON(t, mux, http.MethodPost, "/candidates", map[string]any{
+		"runId": "run-2",
+		"items": []map[string]any{
+			{"vacancyId": "1", "title": "Stuck attempting", "employerName": "Acme", "vacancyUrl": "https://hh.ru/vacancy/1"},
+			{"vacancyId": "2", "title": "Already applied", "employerName": "Acme", "vacancyUrl": "https://hh.ru/vacancy/2"},
+			{"vacancyId": "3", "title": "New vacancy", "employerName": "Acme", "vacancyUrl": "https://hh.ru/vacancy/3"},
+		},
+	})
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected candidates 200, got %d: %s", response.Code, response.Body.String())
+	}
+
+	var body storage.CandidatesResult
+	decodeJSON(t, response, &body)
+	if len(body.Allow) != 2 {
+		t.Fatalf("expected vacancy 1 (attempting) and 3 (new) allowed, got allow=%v", body.Allow)
+	}
+	allowed := map[string]bool{}
+	for _, id := range body.Allow {
+		allowed[id] = true
+	}
+	if !allowed["1"] || !allowed["3"] {
+		t.Fatalf("expected vacancies 1 and 3 in allow list, got %v", body.Allow)
+	}
+	if len(body.Rejected) != 1 || body.Rejected[0].VacancyID != "2" || body.Rejected[0].Reason != "already_processed" {
+		t.Fatalf("expected only vacancy 2 rejected as already_processed, got %+v", body.Rejected)
+	}
+}
+
 func TestAttemptsStartAndVacanciesResultAreIdempotent(t *testing.T) {
 	store := newFakeStore()
 	store.activeRun = &storage.Run{
@@ -316,6 +356,25 @@ func TestStatsAndEventsHandlers(t *testing.T) {
 	}
 }
 
+func TestTelegramTestHandlerQueuesGreeting(t *testing.T) {
+	store := newFakeStore()
+	mux := api.NewRouter(testSecret, store)
+
+	response := doJSON(t, mux, http.MethodPost, "/telegram/test", nil)
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected telegram test 200, got %d: %s", response.Code, response.Body.String())
+	}
+
+	var body storage.NotificationQueueResult
+	decodeJSON(t, response, &body)
+	if !body.Queued {
+		t.Fatalf("expected queued=true, got %+v", body)
+	}
+	if store.telegramTestCalls != 1 {
+		t.Fatalf("expected one telegram test queue call, got %d", store.telegramTestCalls)
+	}
+}
+
 type fakeStore struct {
 	settings            storage.Settings
 	updateSettingsCalls int
@@ -323,6 +382,7 @@ type fakeStore struct {
 	processed           map[string]storage.ProcessedStatus
 	processedRun        map[string]string
 	events              []storage.Event
+	telegramTestCalls   int
 }
 
 func newFakeStore() *fakeStore {
@@ -398,12 +458,16 @@ func (f *fakeStore) FilterCandidates(_ context.Context, runID string, items []st
 	result := storage.CandidatesResult{RemainingDaily: 100, RemainingRun: 25}
 	for _, item := range items {
 		if status, ok := f.processed[item.VacancyID]; ok {
-			result.Rejected = append(result.Rejected, storage.CandidateRejection{
-				VacancyID: item.VacancyID,
-				Reason:    "already_processed",
-				Status:    string(status),
-			})
-			continue
+			if status == storage.ProcessedStatusAttempting {
+				// Vacancies stuck in "attempting" should be retried.
+			} else {
+				result.Rejected = append(result.Rejected, storage.CandidateRejection{
+					VacancyID: item.VacancyID,
+					Reason:    "already_processed",
+					Status:    string(status),
+				})
+				continue
+			}
 		}
 		if item.HasTest && f.settings.SkipWithTest {
 			result.Rejected = append(result.Rejected, storage.CandidateRejection{
@@ -427,6 +491,11 @@ func (f *fakeStore) StartAttempt(_ context.Context, attempt storage.AttemptStart
 	if status, exists := f.processed[attempt.VacancyID]; exists {
 		if status == storage.ProcessedStatusAttempting && f.processedRun[attempt.VacancyID] == attempt.RunID {
 			return storage.AttemptStartResult{Started: false, Reason: "already_attempting"}, nil
+		}
+		if status == storage.ProcessedStatusAttempting {
+			// Allow retry for vacancies stuck in "attempting" from a different run.
+			f.processedRun[attempt.VacancyID] = attempt.RunID
+			return storage.AttemptStartResult{Started: true}, nil
 		}
 		return storage.AttemptStartResult{}, storage.NewConflict("vacancy_already_processed", "vacancy already processed")
 	}
@@ -501,6 +570,11 @@ func (f *fakeStore) GetTodayStats(_ context.Context) (storage.TodayStats, error)
 func (f *fakeStore) RecordEvent(_ context.Context, event storage.Event) error {
 	f.events = append(f.events, event)
 	return nil
+}
+
+func (f *fakeStore) QueueTelegramTest(_ context.Context) (storage.NotificationQueueResult, error) {
+	f.telegramTestCalls++
+	return storage.NotificationQueueResult{Queued: true}, nil
 }
 
 func doJSON(t *testing.T, mux http.Handler, method string, path string, body any) *httptest.ResponseRecorder {

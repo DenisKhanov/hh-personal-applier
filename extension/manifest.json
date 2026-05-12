@@ -18,7 +18,10 @@
       "run_at": "document_idle"
     },
     {
-      "matches": ["https://hh.ru/vacancy/*"],
+      "matches": [
+        "https://hh.ru/vacancy/*",
+        "https://hh.ru/applicant/vacancy_response*"
+      ],
       "js": ["content/vacancy.js"],
       "run_at": "document_idle"
     }

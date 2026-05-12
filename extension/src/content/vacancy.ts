@@ -2,12 +2,13 @@ import {
   isVacancyApplySimpleRequestMessage,
   type VacancyApplySimpleResponse
 } from "../shared/messages";
-import { isHhVacancyUrl } from "../shared/pageGuards";
+import { isHhVacancyRelatedUrl } from "../shared/pageGuards";
 import type { VacancyResultStatus } from "../shared/api";
 import {
   analyzeVacancyPage,
   findApplyButton,
   findResponseSubmitButton,
+  waitForStableAnalysis,
   type VacancyPageAnalysis
 } from "../shared/vacancyPage";
 
@@ -36,7 +37,7 @@ chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) =
 });
 
 async function applySimpleVacancy(): Promise<VacancyApplySimpleResponse> {
-  if (!isHhVacancyUrl(window.location.href)) {
+  if (!isHhVacancyRelatedUrl(window.location.href)) {
     return safetyResponse(
       "dom_mismatch",
       analyzeVacancyPage(document),
@@ -44,10 +45,42 @@ async function applySimpleVacancy(): Promise<VacancyApplySimpleResponse> {
     );
   }
 
-  const beforeClick = analyzeVacancyPage(document);
+  const beforeClick = await waitForStableAnalysis({
+    analyze: () => analyzeVacancyPage(document),
+    delay
+  });
   const beforeClickOutcome = outcomeFromAnalysis(beforeClick);
   if (beforeClickOutcome !== null) {
     return beforeClickOutcome;
+  }
+
+  // On /applicant/vacancy_response pages the apply button was already clicked
+  // (it caused the navigation). If the response form is ready, submit directly.
+  if (beforeClick.state === "response_ready") {
+    const submitButton = findResponseSubmitButton(document);
+    if (submitButton === null) {
+      return safetyResponse(
+        "dom_mismatch",
+        beforeClick,
+        "response submit button not found on response page"
+      );
+    }
+
+    submitButton.click();
+
+    const afterSubmit = await waitForSubmitOutcome();
+    const afterSubmitOutcome = outcomeFromAnalysis(afterSubmit);
+    if (afterSubmitOutcome !== null) {
+      return afterSubmitOutcome;
+    }
+
+    return {
+      ok: true,
+      status: "unknown_after_click",
+      vacancyTitle: afterSubmit.title,
+      employerName: afterSubmit.employerName,
+      notes: "no known success or skip state after response submit"
+    };
   }
 
   const applyButton = findApplyButton(document);
@@ -167,13 +200,14 @@ function outcomeFromAnalysis(
         analysis.notes ?? "vacancy DOM mismatch"
       );
     case "unknown_modal":
-      return {
-        ok: true,
-        status: "unknown_after_click",
-        vacancyTitle: analysis.title,
-        employerName: analysis.employerName,
-        notes: analysis.notes ?? "unknown modal after click"
-      };
+      // Pipeline §7.2: unknown modal halts the cycle. The unknown_after_click
+      // fallback below (when waitForPostClickOutcome saw no visible change)
+      // covers §15.1 — that path stays a continue, this one is a safety stop.
+      return safetyResponse(
+        "unknown_modal",
+        analysis,
+        analysis.notes ?? "unknown modal after click"
+      );
   }
 }
 

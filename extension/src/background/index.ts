@@ -20,18 +20,28 @@ import {
 import {
   SEARCH_PARSE_REQUEST,
   VACANCY_APPLY_SIMPLE_REQUEST,
+  isPopupConfirmResponseMessage,
   isPopupGetStatusMessage,
   isPopupStartRunMessage,
   isPopupStopRunMessage,
   isSearchCandidatesParsedMessage,
+  type ConfirmDecision,
+  type PendingConfirmationView,
   type SearchParseResponseMessage,
   type VacancyApplySimpleResponse
 } from "../shared/messages";
+import {
+  createOwnerConfirmationController,
+  type StoredOwnerConfirmation
+} from "../shared/ownerConfirmation";
 import { isHhSearchVacancyUrl } from "../shared/pageGuards";
 import { completionReason } from "../shared/runPolicy";
+import { sendMessageWithInjection as sendMessageWithInjectedScript } from "../shared/tabMessaging";
 import {
-  waitForTabNavigationComplete,
-  type TabUpdatedListener
+  navigateAndWait,
+  waitForTabReady,
+  type TabNavigationDeps,
+  type TabReadinessSnapshot
 } from "../shared/tabNavigation";
 
 type WorkerPhase = "idle" | "running" | "stopping";
@@ -65,6 +75,21 @@ class SafetyStopError extends Error {
   }
 }
 
+const OWNER_CONFIRMATION_TIMEOUT_MS = 5 * 60 * 1000;
+const PENDING_OWNER_CONFIRMATION_KEY = "pendingOwnerConfirmation";
+
+const ownerConfirmation = createOwnerConfirmationController({
+  setTimeout: (handler, ms) => globalThis.setTimeout(handler, ms),
+  clearTimeout: (handle) => {
+    globalThis.clearTimeout(handle as number);
+  },
+  savePending: saveStoredOwnerConfirmation,
+  clearPending: clearStoredOwnerConfirmation,
+  log(message, data): void {
+    console.log(`[HH Personal Applier] ${message}`, data);
+  }
+});
+
 let state: WorkerState = {
   phase: "idle",
   message: "Idle"
@@ -93,8 +118,31 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
   }
 
   if (isPopupGetStatusMessage(message)) {
-    sendResponse(publicStatus());
-    return false;
+    void publicStatus()
+      .then(sendResponse)
+      .catch((error: unknown) => {
+        logBackgroundError("failed to get status", error);
+        sendResponse(publicStatusSync());
+      });
+    return true;
+  }
+
+  if (isPopupConfirmResponseMessage(message)) {
+    const ok = ownerConfirmation.decide(message.vacancyId, message.decision);
+    if (ok) {
+      sendResponse({ ok: true });
+      return false;
+    }
+    void handleRecoveredConfirmationDecision(message.vacancyId, message.decision)
+      .then(sendResponse)
+      .catch((error: unknown) => {
+        logBackgroundError("failed to handle recovered confirmation", error);
+        sendResponse({
+          ok: false,
+          reason: error instanceof Error ? error.message : "confirmation_failed"
+        });
+      });
+    return true;
   }
 
   if (isPopupStartRunMessage(message)) {
@@ -103,7 +151,7 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
       .catch((error: unknown) => {
         logBackgroundError("failed to start run", error);
         sendResponse({
-          ...publicStatus(),
+          ...publicStatusSync(),
           ok: false,
           error: error instanceof Error ? error.message : "Failed to start run"
         });
@@ -117,7 +165,7 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
       .catch((error: unknown) => {
         logBackgroundError("failed to stop run", error);
         sendResponse({
-          ...publicStatus(),
+          ...publicStatusSync(),
           ok: false,
           error: error instanceof Error ? error.message : "Failed to stop run"
         });
@@ -130,7 +178,7 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
 
 async function startFromPopup(): Promise<Record<string, unknown>> {
   if (state.phase === "running" || state.phase === "stopping") {
-    return { ...publicStatus(), ok: true };
+    return { ...publicStatusSync(), ok: true };
   }
 
   const tab = await activeTab();
@@ -168,13 +216,26 @@ async function startFromPopup(): Promise<Record<string, unknown>> {
     }
   );
 
-  return { ...publicStatus(), ok: true };
+  return { ...publicStatusSync(), ok: true };
 }
 
 async function stopFromPopup(): Promise<Record<string, unknown>> {
   const current = state;
   if (current.phase === "idle") {
-    return { ...publicStatus(), ok: true };
+    // Service worker may have restarted — check backend for stale active runs.
+    const settings = await loadBootstrapSettings();
+    const stats = await getTodayStats(settings);
+    if (stats.activeRun !== null) {
+      console.log("[HH Personal Applier] stopping stale active run from idle state", {
+        runId: stats.activeRun.runId,
+        status: stats.activeRun.status
+      });
+      await stopRun(settings, stats.activeRun.runId, "owner_stop");
+      await clearStoredOwnerConfirmation();
+      return { ...publicStatusSync(), ok: true };
+    }
+    await clearStoredOwnerConfirmation();
+    return { ...publicStatusSync(), ok: true };
   }
 
   current.abortController?.abort();
@@ -188,12 +249,13 @@ async function stopFromPopup(): Promise<Record<string, unknown>> {
     const settings = await loadBootstrapSettings();
     await stopRun(settings, current.runId, "owner_stop");
   }
+  await clearStoredOwnerConfirmation();
 
   state = {
     phase: "idle",
     message: "Stopped by owner"
   };
-  return { ...publicStatus(), ok: true };
+  return { ...publicStatusSync(), ok: true };
 }
 
 async function runApplyCycle(
@@ -209,10 +271,28 @@ async function runApplyCycle(
     message: "Parsing search results"
   };
 
-  const parsed = await requestSearchCandidates(tabId, searchUrl);
+  const parsed = await requestSearchCandidates(tabId, searchUrl, signal);
   ensureNotAborted(signal);
+
+  if (parsed.candidates.length === 0) {
+    console.log("[HH Personal Applier] search parser returned 0 candidates — selectors may not match the current hh.ru DOM");
+  }
+
   const result = await filterCandidates(settings, run.runId, parsed.candidates);
   logCandidateDecisions(run, parsed.candidates, result);
+
+  if (result.allow.length === 0 && parsed.candidates.length > 0) {
+    const reasons = new Map<string, number>();
+    for (const rejection of result.rejected) {
+      reasons.set(rejection.reason, (reasons.get(rejection.reason) ?? 0) + 1);
+    }
+    console.log("[HH Personal Applier] all candidates rejected by backend — cannot apply to any vacancy", {
+      total: parsed.candidates.length,
+      reasons: Object.fromEntries(reasons),
+      remainingDaily: result.remainingDaily,
+      remainingRun: result.remainingRun
+    });
+  }
 
   const candidatesById = new Map(
     parsed.candidates.map((candidate) => [candidate.vacancyId, candidate])
@@ -234,7 +314,7 @@ async function runApplyCycle(
       await abortableDelay(randomPaceMs(run.settingsSnapshot), signal);
     }
 
-    await processCandidate(settings, run.runId, tabId, candidate, signal);
+    await processCandidate(settings, run, tabId, candidate, signal);
     commandCount += 1;
   }
 
@@ -249,11 +329,12 @@ async function runApplyCycle(
 
 async function processCandidate(
   settings: BootstrapSettings,
-  runId: string,
+  run: ApplyRun,
   tabId: number,
   candidate: CandidateItem,
   signal: AbortSignal
 ): Promise<void> {
+  const runId = run.runId;
   state = {
     ...state,
     message: `Opening ${candidate.vacancyId}`
@@ -276,11 +357,50 @@ async function processCandidate(
     return;
   }
 
+  if (run.settingsSnapshot.autoApply === false) {
+    state = {
+      ...state,
+      message: `Awaiting owner confirmation for ${candidate.vacancyId}`
+    };
+    const decision = await ownerConfirmation
+      .request(
+        {
+          vacancyId: candidate.vacancyId,
+          title: candidate.title,
+          employer: candidate.employerName,
+          url: candidate.vacancyUrl,
+          runId,
+          tabId
+        },
+        signal,
+        OWNER_CONFIRMATION_TIMEOUT_MS
+      )
+      .catch((error: unknown) => {
+        if (error instanceof DOMException && error.name === "AbortError") {
+          throw new AbortRunError();
+        }
+        throw error;
+      });
+    if (decision === "skip") {
+      await recordVacancyResult(settings, {
+        runId,
+        vacancyId: candidate.vacancyId,
+        status: "skipped",
+        vacancyTitle: candidate.title,
+        employerName: candidate.employerName,
+        vacancyUrl: candidate.vacancyUrl,
+        notes: "owner declined in popup"
+      });
+      return;
+    }
+    ensureNotAborted(signal);
+  }
+
   state = {
     ...state,
     message: `Applying ${candidate.vacancyId}`
   };
-  const response = await requestVacancyApply(tabId, runId, candidate.vacancyId);
+  const response = await requestVacancyApply(tabId, runId, candidate.vacancyId, signal);
   ensureNotAborted(signal);
 
   if (!response.ok) {
@@ -315,10 +435,10 @@ async function processCandidate(
       details: { notes: response.notes ?? "" }
     });
     await createLocalNotification(
-      "HH Personal Applier paused",
-      "Unknown vacancy state after click. Resolve manually before continuing."
+      "HH Personal Applier",
+      `Unknown vacancy state after click: ${candidate.vacancyId}. Skipped, continuing.`
     );
-    throw new SafetyStopError("Paused: unknown vacancy state after click");
+    // Do NOT throw SafetyStopError — continue to the next vacancy instead.
   }
 }
 
@@ -334,7 +454,11 @@ async function startOrReuseRunningRun(
     }
 
     const stats = await getTodayStats(settings);
-    if (stats.activeRun !== null && stats.activeRun.status === "running") {
+    if (stats.activeRun === null) {
+      throw error;
+    }
+
+    if (stats.activeRun.status === "running") {
       console.log("[HH Personal Applier] reusing active run", {
         runId: stats.activeRun.runId,
         searchUrl: stats.activeRun.searchUrl
@@ -342,13 +466,20 @@ async function startOrReuseRunningRun(
       return stats.activeRun;
     }
 
-    throw error;
+    // Paused or stale active run — stop it and start fresh.
+    console.log("[HH Personal Applier] stopping stale active run before starting new one", {
+      runId: stats.activeRun.runId,
+      status: stats.activeRun.status
+    });
+    await stopRun(settings, stats.activeRun.runId, "owner_stop");
+    return await startRun(settings, pageUrl);
   }
 }
 
 async function requestSearchCandidates(
   tabId: number,
-  pageUrl: string
+  pageUrl: string,
+  signal: AbortSignal
 ): Promise<SearchParseResponseMessage> {
   if (
     latestSearchSnapshot !== null &&
@@ -361,14 +492,16 @@ async function requestSearchCandidates(
   return sendMessageWithInjection<SearchParseResponseMessage>(
     tabId,
     { type: SEARCH_PARSE_REQUEST },
-    "content/search.js"
+    "content/search.js",
+    signal
   );
 }
 
 async function requestVacancyApply(
   tabId: number,
   runId: string,
-  vacancyId: string
+  vacancyId: string,
+  signal: AbortSignal
 ): Promise<VacancyApplySimpleResponse> {
   return sendMessageWithInjection<VacancyApplySimpleResponse>(
     tabId,
@@ -377,24 +510,26 @@ async function requestVacancyApply(
       runId,
       vacancyId
     },
-    "content/vacancy.js"
+    "content/vacancy.js",
+    signal
   );
 }
 
 async function sendMessageWithInjection<T>(
   tabId: number,
   message: unknown,
-  file: string
+  file: string,
+  signal: AbortSignal
 ): Promise<T> {
-  try {
-    return await sendTabMessage<T>(tabId, message);
-  } catch (error) {
-    if (!isMissingReceiver(error)) {
-      throw error;
-    }
-    await executeScriptFile(tabId, file);
-    return sendTabMessage<T>(tabId, message);
-  }
+  return sendMessageWithInjectedScript<T>(tabId, message, file, signal, {
+    sendTabMessage,
+    executeScriptFile,
+    waitForTabReady: async (targetTabId, targetSignal) => {
+      console.log("[HH Personal Applier] message channel closed — page likely navigated, waiting and retrying");
+      await waitForTabReady(targetTabId, targetSignal, tabNavigationDeps);
+    },
+    ensureNotAborted: () => ensureNotAborted(signal)
+  });
 }
 
 function logCandidateDecisions(
@@ -471,13 +606,193 @@ async function recordSafetyStop(
   );
 }
 
-function publicStatus(): Record<string, unknown> {
+async function publicStatus(): Promise<Record<string, unknown>> {
+  return publicStatusSync(await pendingConfirmationForStatus());
+}
+
+function publicStatusSync(
+  pendingConfirmation: PendingConfirmationView | null = ownerConfirmation.getPending()
+): Record<string, unknown> {
   return {
     phase: state.phase,
     message: state.message,
     runId: state.runId ?? null,
-    tabId: state.tabId ?? null
+    tabId: state.tabId ?? null,
+    pendingConfirmation
   };
+}
+
+async function pendingConfirmationForStatus(): Promise<PendingConfirmationView | null> {
+  const inMemory = ownerConfirmation.getPending();
+  if (inMemory !== null) {
+    return inMemory;
+  }
+
+  const stored = await loadStoredOwnerConfirmation();
+  if (stored === null) {
+    return null;
+  }
+
+  if (Date.now() < stored.expiresAtMs) {
+    return pendingView(stored);
+  }
+
+  await finalizeRecoveredSkip(
+    stored,
+    "owner confirmation timed out while service worker was dormant"
+  );
+  state = {
+    phase: "idle",
+    message: `Owner confirmation timed out for ${stored.vacancyId}`
+  };
+  return null;
+}
+
+async function handleRecoveredConfirmationDecision(
+  vacancyId: string,
+  decision: ConfirmDecision
+): Promise<Record<string, unknown>> {
+  const stored = await loadStoredOwnerConfirmation();
+  if (stored === null || stored.vacancyId !== vacancyId) {
+    return { ok: false, reason: "no_pending_confirmation" };
+  }
+
+  if (Date.now() >= stored.expiresAtMs) {
+    await finalizeRecoveredSkip(
+      stored,
+      "owner confirmation timed out while service worker was dormant"
+    );
+    return { ok: false, reason: "confirmation_expired" };
+  }
+
+  await clearStoredOwnerConfirmation();
+  const settings = await loadBootstrapSettings();
+
+  if (decision === "skip") {
+    await recordVacancyResult(settings, {
+      runId: stored.runId,
+      vacancyId: stored.vacancyId,
+      status: "skipped",
+      vacancyTitle: stored.title,
+      employerName: stored.employer,
+      vacancyUrl: stored.url,
+      notes: "owner declined in popup after service worker restart"
+    });
+    await stopRun(settings, stored.runId, "owner_stop");
+    state = {
+      phase: "idle",
+      message: `Recovered skip for ${stored.vacancyId}; run stopped`
+    };
+    return { ok: true, recovered: true };
+  }
+
+  const signal = new AbortController().signal;
+  const response = await requestVacancyApply(
+    stored.tabId,
+    stored.runId,
+    stored.vacancyId,
+    signal
+  );
+
+  if (!response.ok) {
+    await recordVacancyResult(settings, {
+      runId: stored.runId,
+      vacancyId: stored.vacancyId,
+      status: "error",
+      vacancyTitle: response.vacancyTitle || stored.title,
+      employerName: response.employerName || stored.employer,
+      vacancyUrl: stored.url,
+      notes: response.message
+    });
+    await recordSafetyStop(settings, stored.runId, stored.vacancyId, response);
+    state = {
+      phase: "idle",
+      message: `Paused: ${response.message}`
+    };
+    return { ok: true, recovered: true };
+  }
+
+  await recordVacancyResult(settings, {
+    runId: stored.runId,
+    vacancyId: stored.vacancyId,
+    status: response.status,
+    vacancyTitle: response.vacancyTitle || stored.title,
+    employerName: response.employerName || stored.employer,
+    vacancyUrl: stored.url,
+    ...(response.notes === undefined ? {} : { notes: response.notes })
+  });
+  await stopRun(settings, stored.runId, "owner_stop");
+  state = {
+    phase: "idle",
+    message: `Recovered confirmation for ${stored.vacancyId}; run stopped`
+  };
+  return { ok: true, recovered: true };
+}
+
+async function finalizeRecoveredSkip(
+  stored: StoredOwnerConfirmation,
+  notes: string
+): Promise<void> {
+  await clearStoredOwnerConfirmation();
+  const settings = await loadBootstrapSettings();
+  await recordVacancyResult(settings, {
+    runId: stored.runId,
+    vacancyId: stored.vacancyId,
+    status: "skipped",
+    vacancyTitle: stored.title,
+    employerName: stored.employer,
+    vacancyUrl: stored.url,
+    notes
+  });
+  await stopRun(settings, stored.runId, "owner_stop");
+}
+
+function pendingView(
+  stored: StoredOwnerConfirmation
+): PendingConfirmationView {
+  return {
+    vacancyId: stored.vacancyId,
+    title: stored.title,
+    employer: stored.employer,
+    url: stored.url
+  };
+}
+
+async function saveStoredOwnerConfirmation(
+  record: StoredOwnerConfirmation
+): Promise<void> {
+  await chrome.storage.local.set({
+    [PENDING_OWNER_CONFIRMATION_KEY]: record
+  });
+}
+
+async function clearStoredOwnerConfirmation(): Promise<void> {
+  await chrome.storage.local.remove(PENDING_OWNER_CONFIRMATION_KEY);
+}
+
+async function loadStoredOwnerConfirmation(): Promise<StoredOwnerConfirmation | null> {
+  const stored = await chrome.storage.local.get(PENDING_OWNER_CONFIRMATION_KEY);
+  const value = stored[PENDING_OWNER_CONFIRMATION_KEY];
+  return isStoredOwnerConfirmation(value) ? value : null;
+}
+
+function isStoredOwnerConfirmation(
+  value: unknown
+): value is StoredOwnerConfirmation {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  const record = value as Partial<StoredOwnerConfirmation>;
+  return (
+    typeof record.vacancyId === "string" &&
+    typeof record.title === "string" &&
+    typeof record.employer === "string" &&
+    typeof record.url === "string" &&
+    typeof record.runId === "string" &&
+    typeof record.tabId === "number" &&
+    typeof record.createdAtMs === "number" &&
+    typeof record.expiresAtMs === "number"
+  );
 }
 
 async function activeTab(): Promise<chrome.tabs.Tab> {
@@ -492,31 +807,50 @@ async function activeTab(): Promise<chrome.tabs.Tab> {
   return tab;
 }
 
+const tabNavigationDeps: TabNavigationDeps = {
+  async update(tabId: number, url: string): Promise<void> {
+    await chrome.tabs.update(tabId, { url });
+  },
+  async probeReadiness(tabId: number): Promise<TabReadinessSnapshot | null> {
+    try {
+      const results = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: () => ({
+          readyState: document.readyState as
+            | "loading"
+            | "interactive"
+            | "complete",
+          href: location.href
+        })
+      });
+      const value = results[0]?.result;
+      if (value === undefined || value === null) {
+        return null;
+      }
+      return value;
+    } catch {
+      // Transient: frame teardown, "cannot access contents of url",
+      // "no frame with id" — caller retries.
+      return null;
+    }
+  },
+  async delay(ms: number): Promise<void> {
+    await new Promise<void>((resolve) =>
+      globalThis.setTimeout(resolve, ms)
+    );
+  },
+  log(message: string, data: Record<string, unknown>): void {
+    console.log(`[HH Personal Applier] ${message}`, data);
+  }
+};
+
 async function navigateTab(
   tabId: number,
   url: string,
   signal: AbortSignal
 ): Promise<void> {
   ensureNotAborted(signal);
-  await waitForTabNavigationComplete(tabId, url, signal, {
-    update: async (targetTabId, targetUrl) => {
-      await chrome.tabs.update(targetTabId, { url: targetUrl });
-    },
-    get: async (targetTabId) => {
-      const tab = await chrome.tabs.get(targetTabId);
-      return { status: tab.status, url: tab.url };
-    },
-    addUpdatedListener: (listener: TabUpdatedListener) => {
-      chrome.tabs.onUpdated.addListener(listener);
-    },
-    removeUpdatedListener: (listener: TabUpdatedListener) => {
-      chrome.tabs.onUpdated.removeListener(listener);
-    },
-    setTimeout: (handler, timeoutMs) => globalThis.setTimeout(handler, timeoutMs),
-    clearTimeout: (timeoutId) => {
-      globalThis.clearTimeout(timeoutId as number);
-    }
-  });
+  await navigateAndWait(tabId, url, signal, tabNavigationDeps);
 }
 
 function sendTabMessage<T>(tabId: number, message: unknown): Promise<T> {
@@ -549,15 +883,6 @@ function executeScriptFile(tabId: number, file: string): Promise<void> {
       }
     );
   });
-}
-
-function isMissingReceiver(error: unknown): boolean {
-  return (
-    error instanceof Error &&
-    /receiving end does not exist|could not establish connection/i.test(
-      error.message
-    )
-  );
 }
 
 function randomPaceMs(settings: ApplyRun["settingsSnapshot"]): number {

@@ -5,6 +5,7 @@ export const SEARCH_PARSE_REQUEST = "HH_SEARCH_PARSE_REQUEST";
 export const POPUP_START_RUN = "HH_POPUP_START_RUN";
 export const POPUP_STOP_RUN = "HH_POPUP_STOP_RUN";
 export const POPUP_GET_STATUS = "HH_POPUP_GET_STATUS";
+export const POPUP_CONFIRM_RESPONSE = "HH_POPUP_CONFIRM_RESPONSE";
 export const VACANCY_APPLY_SIMPLE_REQUEST = "HH_VACANCY_APPLY_SIMPLE_REQUEST";
 
 export interface SearchCandidatesParsedMessage {
@@ -34,6 +35,21 @@ export interface PopupStopRunMessage {
 
 export interface PopupGetStatusMessage {
   type: typeof POPUP_GET_STATUS;
+}
+
+export type ConfirmDecision = "confirm" | "skip";
+
+export interface PopupConfirmResponseMessage {
+  type: typeof POPUP_CONFIRM_RESPONSE;
+  vacancyId: string;
+  decision: ConfirmDecision;
+}
+
+export interface PendingConfirmationView {
+  vacancyId: string;
+  title: string;
+  employer: string;
+  url: string;
 }
 
 export interface VacancyApplySimpleRequestMessage {
@@ -69,6 +85,7 @@ export type ExtensionMessage =
   | PopupStartRunMessage
   | PopupStopRunMessage
   | PopupGetStatusMessage
+  | PopupConfirmResponseMessage
   | VacancyApplySimpleRequestMessage;
 
 export function isSearchCandidatesParsedMessage(
@@ -109,6 +126,21 @@ export function isPopupGetStatusMessage(
   message: unknown
 ): message is PopupGetStatusMessage {
   return hasType(message, POPUP_GET_STATUS);
+}
+
+export function isPopupConfirmResponseMessage(
+  message: unknown
+): message is PopupConfirmResponseMessage {
+  if (typeof message !== "object" || message === null) {
+    return false;
+  }
+
+  const value = message as Partial<PopupConfirmResponseMessage>;
+  return (
+    value.type === POPUP_CONFIRM_RESPONSE &&
+    typeof value.vacancyId === "string" &&
+    (value.decision === "confirm" || value.decision === "skip")
+  );
 }
 
 export function isVacancyApplySimpleRequestMessage(

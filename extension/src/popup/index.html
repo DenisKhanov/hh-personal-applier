@@ -47,6 +47,9 @@
             Check
           </button>
         </div>
+        <button id="telegramTestButton" type="button" class="wide">
+          Send test message to Telegram
+        </button>
       </section>
 
       <section class="panel run-panel">
@@ -60,6 +63,17 @@
         <div class="actions">
           <button id="startButton" type="button" class="primary">Start</button>
           <button id="stopButton" type="button" class="danger">Stop</button>
+        </div>
+      </section>
+
+      <section id="confirmPanel" class="panel confirm-panel" hidden>
+        <h2>Подтверждение отклика</h2>
+        <p id="confirmTitle" class="confirm-title"></p>
+        <p id="confirmEmployer" class="confirm-employer"></p>
+        <a id="confirmLink" class="confirm-link" href="#" target="_blank" rel="noreferrer"></a>
+        <div class="actions">
+          <button id="confirmButton" type="button" class="primary">Подтвердить</button>
+          <button id="skipButton" type="button" class="danger">Пропустить</button>
         </div>
       </section>
 

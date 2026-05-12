@@ -1,6 +1,9 @@
 package storage
 
-import "context"
+import (
+	"context"
+	"encoding/json"
+)
 
 type Store interface {
 	GetSettings(ctx context.Context) (Settings, error)
@@ -13,6 +16,30 @@ type Store interface {
 	FinalizeVacancyResult(ctx context.Context, result VacancyResult) (VacancyResultOutcome, error)
 	GetTodayStats(ctx context.Context) (TodayStats, error)
 	RecordEvent(ctx context.Context, event Event) error
+	QueueTelegramTest(ctx context.Context) (NotificationQueueResult, error)
+}
+
+type NotificationKind string
+
+const (
+	NotificationKindCaptcha             NotificationKind = "captcha"
+	NotificationKindError               NotificationKind = "error"
+	NotificationKindDailyLimitReached   NotificationKind = "daily_limit_reached"
+	NotificationKindCoverLetterApproval NotificationKind = "cover_letter_approval"
+	NotificationKindDailyReport         NotificationKind = "daily_report"
+	NotificationKindLoginLost           NotificationKind = "login_lost"
+	NotificationKindTelegramTest        NotificationKind = "telegram_test"
+)
+
+type Notification struct {
+	ID       string
+	Kind     NotificationKind
+	Payload  json.RawMessage
+	Attempts int
+}
+
+type NotificationQueueResult struct {
+	Queued bool `json:"queued"`
 }
 
 type Settings struct {

@@ -147,6 +147,11 @@ input:focus {
   gap: 8px;
 }
 
+.wide {
+  width: 100%;
+  margin-top: 8px;
+}
+
 button {
   min-height: 36px;
   border: 1px solid var(--line);
@@ -194,4 +199,29 @@ button:disabled {
   border-left: 3px solid var(--accent);
   background: #ffffff;
   color: var(--muted);
+}
+
+.confirm-panel {
+  margin-top: 10px;
+  border-color: var(--warning);
+  background: #fffbef;
+}
+
+.confirm-title {
+  margin-top: 6px;
+  font-weight: 760;
+}
+
+.confirm-employer {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.confirm-link {
+  display: inline-block;
+  margin: 6px 0 10px;
+  color: var(--accent);
+  font-size: 12px;
+  word-break: break-all;
 }

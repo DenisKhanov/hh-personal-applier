@@ -228,7 +228,8 @@ CREATE TABLE notifications_outbox (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     kind TEXT NOT NULL CHECK (kind IN (
         'captcha', 'error', 'daily_limit_reached',
-        'cover_letter_approval', 'daily_report', 'login_lost'
+        'cover_letter_approval', 'daily_report', 'login_lost',
+        'telegram_test'
     )),
     payload JSONB NOT NULL,
     -- dedup_key предотвращает повторную отправку однотипных нотификаций
@@ -519,6 +520,7 @@ Backend при `POST /runs/continue` проверяет, что run сущест
   - `cover_letter_approval` — только Telegram, с inline кнопками (chrome notification без интерактива бессмыслен).
   - `daily_report` — только Telegram, в 23:55 `APP_TIMEZONE`; dedup_key = `daily_report:<date>`.
   - `login_lost` — оба канала, мгновенно.
+  - `telegram_test` — только Telegram, вручную из popup для проверки связки backend → outbox → bot.
 - [ ] Inline-кнопки только для `cover_letter_approval`. Остальное — текст.
 - [ ] Bot принимает один callback от одного `TELEGRAM_OWNER_CHAT_ID`. Любой другой chat — игнор.
 
@@ -613,10 +615,13 @@ Backend при `POST /runs/continue` проверяет, что run сущест
 - [ ] Manual smoke: 5 вакансий без писем подряд, Stop во время pacing, CAPTCHA/login-lost simulated path, без превышения limits.
 
 ### Этап 6. Telegram outbox
-- [ ] `internal/telegram` адаптер (telebot.v3).
-- [ ] Outbox dispatcher горутина: каждые 5s достаёт `pending`, отправляет, обновляет статус.
-- [ ] Уведомления: `captcha`, `error`, `daily_limit_reached`, `daily_report`, `login_lost`.
-- [ ] Daily report в 23:55 (cron внутри backend).
+- [x] `internal/telegram` адаптер (telebot.v3).
+- [x] Outbox dispatcher горутина: каждые 5s достаёт `pending`, отправляет, обновляет статус.
+- [x] Уведомления: `captcha`, `error`, `daily_limit_reached`, `daily_report`, `login_lost`, `telegram_test`.
+- [x] Daily report в 23:55 (cron внутри backend).
+- [x] Popup-кнопка «Send test message to Telegram» вызывает `POST /telegram/test`, который кладёт приветствие в `notifications_outbox`.
+- [x] Verification: `go vet ./...`, `go test ./...`, `npm test`, `npm run typecheck`, `npm run lint`, `npm run build`.
+- [ ] Manual smoke: реальная отправка `telegram_test`, `captcha`/`login_lost` в Telegram и daily report через временно сдвинутый cron.
 
 ### Этап 7. LLM cover letters
 - [ ] `internal/llm` — Groq adapter за интерфейсом.
@@ -645,7 +650,7 @@ Backend при `POST /runs/continue` проверяет, что run сущест
 - [ ] CAPTCHA детектится → цикл встал → Telegram алерт пришёл.
 - [ ] Stop в popup мгновенно прерывает цикл.
 - [ ] Дневной лимит из настроек не превышается; default 100, можно выставить минимум 100 для личного режима.
-- [ ] Дневной отчёт в Telegram приходит в 23:55.
+- [ ] Дневной отчёт в Telegram приходит в 22:00.
 - [ ] Никакой запрос не уходит за пределы `127.0.0.1` и явно настроенных HH host permissions.
 
 ---

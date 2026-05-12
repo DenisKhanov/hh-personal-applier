@@ -1,88 +1,122 @@
-export interface TabSnapshot {
-  status?: string | undefined;
-  url?: string | undefined;
+export interface TabReadinessSnapshot {
+  readyState: "loading" | "interactive" | "complete" | "unknown";
+  href: string;
 }
-
-export type TabUpdatedListener = (
-  tabId: number,
-  changeInfo: { status?: string | undefined },
-  tab?: TabSnapshot
-) => void;
 
 export interface TabNavigationDeps {
   update(tabId: number, url: string): Promise<void>;
-  get(tabId: number): Promise<TabSnapshot>;
-  addUpdatedListener(listener: TabUpdatedListener): void;
-  removeUpdatedListener(listener: TabUpdatedListener): void;
-  setTimeout(handler: () => void, ms: number): unknown;
-  clearTimeout(timeoutId: unknown): void;
+  // Returns null on transient failures (frame teardown, "cannot access contents
+  // of url", "no frame with id"). Callers treat null as not-ready and keep polling.
+  probeReadiness(tabId: number): Promise<TabReadinessSnapshot | null>;
+  delay(ms: number): Promise<void>;
+  log?(message: string, data: Record<string, unknown>): void;
 }
 
+export interface WaitForTabReadyOptions {
+  expectedUrl?: string;
+  timeoutMs?: number;
+  pollIntervalMs?: number;
+}
+
+const DEFAULT_TIMEOUT_MS = 15000;
+const DEFAULT_POLL_INTERVAL_MS = 250;
+
 export class TabNavigationTimeoutError extends Error {
-  constructor(url: string) {
-    super(`Timed out waiting for vacancy page to load: ${url}`);
+  readonly snapshot: TabReadinessSnapshot | null;
+
+  constructor(url: string, snapshot: TabReadinessSnapshot | null) {
+    super(
+      url === ""
+        ? "Timed out waiting for tab to become ready"
+        : `Timed out waiting for vacancy page to load: ${url}`
+    );
     this.name = "TabNavigationTimeoutError";
+    this.snapshot = snapshot;
   }
 }
 
-export function waitForTabNavigationComplete(
+export async function waitForTabReady(
+  tabId: number,
+  signal: AbortSignal,
+  deps: TabNavigationDeps,
+  opts: WaitForTabReadyOptions = {}
+): Promise<TabReadinessSnapshot> {
+  if (signal.aborted) {
+    throw new DOMException("Aborted", "AbortError");
+  }
+
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const pollIntervalMs = opts.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
+  const deadline = Date.now() + timeoutMs;
+  let lastSnapshot: TabReadinessSnapshot | null = null;
+  let firstIteration = true;
+
+  while (Date.now() < deadline) {
+    if (signal.aborted) {
+      throw new DOMException("Aborted", "AbortError");
+    }
+
+    if (!firstIteration) {
+      await deps.delay(pollIntervalMs);
+      if (signal.aborted) {
+        throw new DOMException("Aborted", "AbortError");
+      }
+    }
+    firstIteration = false;
+
+    const snapshot = await deps.probeReadiness(tabId);
+    if (snapshot === null) {
+      continue;
+    }
+
+    lastSnapshot = snapshot;
+
+    if (
+      opts.expectedUrl !== undefined &&
+      !pathnamesMatch(snapshot.href, opts.expectedUrl)
+    ) {
+      continue;
+    }
+
+    if (snapshot.readyState === "loading") {
+      continue;
+    }
+
+    return snapshot;
+  }
+
+  deps.log?.("waitForTabReady timed out", {
+    expectedUrl: opts.expectedUrl ?? null,
+    timeoutMs,
+    lastSnapshot
+  });
+
+  throw new TabNavigationTimeoutError(opts.expectedUrl ?? "", lastSnapshot);
+}
+
+export async function navigateAndWait(
   tabId: number,
   url: string,
   signal: AbortSignal,
   deps: TabNavigationDeps,
-  timeoutMs = 30000
-): Promise<void> {
+  opts: Pick<WaitForTabReadyOptions, "timeoutMs" | "pollIntervalMs"> = {}
+): Promise<TabReadinessSnapshot> {
   if (signal.aborted) {
-    return Promise.reject(new DOMException("Aborted", "AbortError"));
+    throw new DOMException("Aborted", "AbortError");
   }
+  await deps.update(tabId, url);
+  return waitForTabReady(tabId, signal, deps, { expectedUrl: url, ...opts });
+}
 
-  return new Promise((resolve, reject) => {
-    let settled = false;
-    const timeoutId = deps.setTimeout(() => {
-      settle(() => reject(new TabNavigationTimeoutError(url)));
-    }, timeoutMs);
-
-    const cleanup = (): void => {
-      deps.clearTimeout(timeoutId);
-      deps.removeUpdatedListener(listener);
-      signal.removeEventListener("abort", onAbort);
-    };
-
-    const settle = (complete: () => void): void => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      cleanup();
-      complete();
-    };
-
-    const resolveIfComplete = (snapshot: TabSnapshot): void => {
-      if (snapshot.status === "complete") {
-        settle(resolve);
-      }
-    };
-
-    const onAbort = (): void => {
-      settle(() => reject(new DOMException("Aborted", "AbortError")));
-    };
-
-    const listener: TabUpdatedListener = (updatedTabId, changeInfo, tab) => {
-      if (updatedTabId !== tabId || changeInfo.status !== "complete") {
-        return;
-      }
-      resolveIfComplete(tab ?? { status: changeInfo.status });
-    };
-
-    signal.addEventListener("abort", onAbort, { once: true });
-    deps.addUpdatedListener(listener);
-
-    void deps
-      .update(tabId, url)
-      .then(() => deps.get(tabId))
-      .then(resolveIfComplete)
-      .catch((error: unknown) => {
-        settle(() => reject(error));
-      });
-  });
+function pathnamesMatch(rawHref: string, expectedUrl: string): boolean {
+  try {
+    const actual = new URL(rawHref);
+    const expected = new URL(expectedUrl);
+    return (
+      actual.hostname === expected.hostname &&
+      actual.pathname === expected.pathname
+    );
+  } catch {
+    return false;
+  }
 }

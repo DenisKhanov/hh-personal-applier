@@ -2,23 +2,36 @@ import {
   checkBackendHealth,
   loadBootstrapSettings,
   saveBootstrapSettings,
+  sendTelegramTest,
   type BootstrapSettings
 } from "../shared/api";
 import {
+  POPUP_CONFIRM_RESPONSE,
   POPUP_GET_STATUS,
   POPUP_START_RUN,
-  POPUP_STOP_RUN
+  POPUP_STOP_RUN,
+  type ConfirmDecision,
+  type PendingConfirmationView
 } from "../shared/messages";
 
 const backendUrlInput = query<HTMLInputElement>("#backendUrl");
 const sharedSecretInput = query<HTMLInputElement>("#sharedSecret");
 const saveButton = query<HTMLButtonElement>("#saveButton");
 const healthButton = query<HTMLButtonElement>("#healthButton");
+const telegramTestButton = query<HTMLButtonElement>("#telegramTestButton");
 const startButton = query<HTMLButtonElement>("#startButton");
 const stopButton = query<HTMLButtonElement>("#stopButton");
 const statusBadge = query<HTMLElement>("#statusBadge");
 const message = query<HTMLElement>("#message");
 const runStatus = query<HTMLElement>("#runStatus");
+const confirmPanel = query<HTMLElement>("#confirmPanel");
+const confirmTitle = query<HTMLElement>("#confirmTitle");
+const confirmEmployer = query<HTMLElement>("#confirmEmployer");
+const confirmLink = query<HTMLAnchorElement>("#confirmLink");
+const confirmButton = query<HTMLButtonElement>("#confirmButton");
+const skipButton = query<HTMLButtonElement>("#skipButton");
+
+let lastPendingVacancyId: string | null = null;
 
 void initialize();
 
@@ -35,6 +48,10 @@ async function initialize(): Promise<void> {
     void runHealthCheck();
   });
 
+  telegramTestButton.addEventListener("click", () => {
+    void sendTelegramTestFromPopup();
+  });
+
   startButton.addEventListener("click", () => {
     void startRunFromPopup();
   });
@@ -43,13 +60,66 @@ async function initialize(): Promise<void> {
     void stopRunFromPopup();
   });
 
+  confirmButton.addEventListener("click", () => {
+    void sendConfirmDecision("confirm");
+  });
+
+  skipButton.addEventListener("click", () => {
+    void sendConfirmDecision("skip");
+  });
+
   await refreshRunStatus();
+}
+
+async function sendConfirmDecision(decision: ConfirmDecision): Promise<void> {
+  if (lastPendingVacancyId === null) return;
+  confirmButton.disabled = true;
+  skipButton.disabled = true;
+  try {
+    await sendRuntimeMessage({
+      type: POPUP_CONFIRM_RESPONSE,
+      vacancyId: lastPendingVacancyId,
+      decision
+    });
+    await refreshRunStatus();
+  } finally {
+    confirmButton.disabled = false;
+    skipButton.disabled = false;
+  }
 }
 
 async function saveCurrentSettings(): Promise<void> {
   await saveBootstrapSettings(readSettings());
   setStatus("idle", "Saved");
   message.textContent = "Bootstrap settings saved locally.";
+}
+
+async function sendTelegramTestFromPopup(): Promise<void> {
+  setStatus("checking", "Sending");
+  message.textContent = "Queueing Telegram test greeting...";
+  telegramTestButton.disabled = true;
+
+  try {
+    const settings = readSettings();
+    await saveBootstrapSettings(settings);
+    const result = await sendTelegramTest(settings);
+    if (result.queued) {
+      setStatus("ok", "Queued");
+      message.textContent =
+        "Telegram test greeting queued. It should arrive in a few seconds.";
+    } else {
+      setStatus("error", "Failed");
+      message.textContent = "Backend did not queue the Telegram test greeting.";
+    }
+  } catch (error) {
+    setStatus("error", "Failed");
+    message.textContent =
+      error instanceof Error
+        ? error.message
+        : "Failed to queue Telegram test greeting.";
+  } finally {
+    telegramTestButton.disabled = false;
+  }
 }
 
 async function startRunFromPopup(): Promise<void> {
@@ -63,6 +133,7 @@ async function startRunFromPopup(): Promise<void> {
     renderRunStatus(response);
     message.textContent =
       typeof response.error === "string" ? response.error : "Run started.";
+    startStatusPolling();
   } catch (error) {
     message.textContent =
       error instanceof Error ? error.message : "Failed to start run.";
@@ -105,6 +176,46 @@ function renderRunStatus(response: Record<string, unknown>): void {
   const statusMessage =
     typeof response.message === "string" ? response.message : "Idle";
   runStatus.textContent = `${phase}: ${statusMessage}`;
+  renderPendingConfirmation(response.pendingConfirmation);
+  if (phase === "running" || phase === "stopping") {
+    startStatusPolling();
+  }
+}
+
+function renderPendingConfirmation(raw: unknown): void {
+  const pending = parsePendingConfirmation(raw);
+  if (pending === null) {
+    confirmPanel.hidden = true;
+    lastPendingVacancyId = null;
+    return;
+  }
+  confirmPanel.hidden = false;
+  confirmTitle.textContent = pending.title || pending.vacancyId;
+  confirmEmployer.textContent = pending.employer;
+  confirmLink.textContent = pending.url;
+  confirmLink.href = pending.url;
+  lastPendingVacancyId = pending.vacancyId;
+}
+
+function parsePendingConfirmation(raw: unknown): PendingConfirmationView | null {
+  if (typeof raw !== "object" || raw === null) {
+    return null;
+  }
+  const value = raw as Partial<PendingConfirmationView>;
+  if (
+    typeof value.vacancyId !== "string" ||
+    typeof value.title !== "string" ||
+    typeof value.employer !== "string" ||
+    typeof value.url !== "string"
+  ) {
+    return null;
+  }
+  return {
+    vacancyId: value.vacancyId,
+    title: value.title,
+    employer: value.employer,
+    url: value.url
+  };
 }
 
 async function runHealthCheck(): Promise<void> {
@@ -159,4 +270,38 @@ function sendRuntimeMessage(message: unknown): Promise<Record<string, unknown>> 
       resolve(response ?? {});
     });
   });
+}
+
+let statusPollingTimer: ReturnType<typeof setInterval> | null = null;
+
+function startStatusPolling(): void {
+  stopStatusPolling();
+  statusPollingTimer = setInterval(() => {
+    void refreshRunStatusAndCheckDone();
+  }, 1500);
+}
+
+function stopStatusPolling(): void {
+  if (statusPollingTimer !== null) {
+    clearInterval(statusPollingTimer);
+    statusPollingTimer = null;
+  }
+}
+
+async function refreshRunStatusAndCheckDone(): Promise<void> {
+  try {
+    const response = await sendRuntimeMessage({
+      type: POPUP_GET_STATUS
+    });
+    renderRunStatus(response);
+    const phase = typeof response.phase === "string" ? response.phase : "idle";
+    if (phase === "idle") {
+      stopStatusPolling();
+      const statusMessage =
+        typeof response.message === "string" ? response.message : "Idle";
+      message.textContent = statusMessage;
+    }
+  } catch {
+    stopStatusPolling();
+  }
 }

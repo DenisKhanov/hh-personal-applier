@@ -125,7 +125,13 @@ func (s *Store) StopRun(ctx context.Context, runID string, reason string) (stora
 	}
 	status := storage.StopStatusForReason(reason)
 
-	run, err := scanRun(s.db.QueryRowContext(ctx, `
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return storage.Run{}, err
+	}
+	defer rollback(tx)
+
+	run, err := scanRun(tx.QueryRowContext(ctx, `
 		UPDATE apply_runs
 		SET status = $2, stop_reason = $3, stopped_at = now()
 		WHERE id = $1
@@ -137,6 +143,14 @@ func (s *Store) StopRun(ctx context.Context, runID string, reason string) (stora
 		reason,
 	))
 	if err == nil {
+		if reason == "daily_limit_reached" {
+			if err := s.enqueueDailyLimitReached(ctx, tx, run); err != nil {
+				return storage.Run{}, err
+			}
+		}
+		if err := tx.Commit(); err != nil {
+			return storage.Run{}, err
+		}
 		return run, nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
@@ -206,12 +220,17 @@ func (s *Store) FilterCandidates(ctx context.Context, runID string, items []stor
 
 	for _, item := range items {
 		if status, ok := processed[item.VacancyID]; ok {
-			result.Rejected = append(result.Rejected, storage.CandidateRejection{
-				VacancyID: item.VacancyID,
-				Reason:    "already_processed",
-				Status:    string(status),
-			})
-			continue
+			if status == storage.ProcessedStatusAttempting {
+				// Vacancies stuck in "attempting" from a previous interrupted run
+				// should be retried, not skipped.
+			} else {
+				result.Rejected = append(result.Rejected, storage.CandidateRejection{
+					VacancyID: item.VacancyID,
+					Reason:    "already_processed",
+					Status:    string(status),
+				})
+				continue
+			}
 		}
 		if item.IsArchived {
 			result.Rejected = append(result.Rejected, storage.CandidateRejection{VacancyID: item.VacancyID, Reason: "archived"})
@@ -254,7 +273,16 @@ func (s *Store) StartAttempt(ctx context.Context, attempt storage.AttemptStart) 
 		    notes, attempt_started_at, updated_at
 		)
 		VALUES ($1, $2, 'attempting', $3, $4, $5, $6, now(), now())
-		ON CONFLICT (vacancy_id) DO NOTHING`,
+		ON CONFLICT (vacancy_id)
+		DO UPDATE SET run_id = EXCLUDED.run_id,
+		              status = EXCLUDED.status,
+		              vacancy_title = COALESCE(NULLIF(EXCLUDED.vacancy_title, ''), processed_vacancies.vacancy_title),
+		              employer_name = COALESCE(NULLIF(EXCLUDED.employer_name, ''), processed_vacancies.employer_name),
+		              vacancy_url = COALESCE(NULLIF(EXCLUDED.vacancy_url, ''), processed_vacancies.vacancy_url),
+		              notes = COALESCE(NULLIF(EXCLUDED.notes, ''), processed_vacancies.notes),
+		              attempt_started_at = now(),
+		              updated_at = now()
+		WHERE processed_vacancies.status = 'attempting'`,
 		attempt.VacancyID,
 		attempt.RunID,
 		nullIfEmpty(attempt.VacancyTitle),
@@ -273,6 +301,7 @@ func (s *Store) StartAttempt(ctx context.Context, attempt storage.AttemptStart) 
 		return storage.AttemptStartResult{Started: true}, nil
 	}
 
+	// rows == 0: either already_attempting in the same run, or a terminal status.
 	var existingStatus string
 	var existingRunID sql.NullString
 	if err := s.db.QueryRowContext(ctx, `
@@ -460,6 +489,118 @@ func (s *Store) RecordEvent(ctx context.Context, event storage.Event) error {
 	}
 
 	return tx.Commit()
+}
+
+func (s *Store) ClaimPendingNotifications(ctx context.Context, limit int, now time.Time) ([]storage.Notification, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id::text, kind, payload, attempts
+		FROM notifications_outbox
+		WHERE status = 'pending'
+		  AND next_retry_at <= $1
+		ORDER BY created_at
+		LIMIT $2`,
+		now,
+		limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	notifications := []storage.Notification{}
+	for rows.Next() {
+		var notification storage.Notification
+		var kind string
+		var payload []byte
+		if err := rows.Scan(&notification.ID, &kind, &payload, &notification.Attempts); err != nil {
+			return nil, err
+		}
+		notification.Kind = storage.NotificationKind(kind)
+		notification.Payload = append(json.RawMessage(nil), payload...)
+		notifications = append(notifications, notification)
+	}
+	return notifications, rows.Err()
+}
+
+func (s *Store) MarkNotificationSent(ctx context.Context, id string, sentAt time.Time) error {
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE notifications_outbox
+		SET status = 'sent',
+		    sent_at = $2,
+		    last_error = NULL
+		WHERE id = $1
+		  AND status = 'pending'`,
+		id,
+		sentAt,
+	)
+	return err
+}
+
+func (s *Store) MarkNotificationFailed(ctx context.Context, id string, lastError string, nextRetryAt time.Time, final bool) error {
+	status := "pending"
+	if final {
+		status = "failed"
+	}
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE notifications_outbox
+		SET status = $2,
+		    attempts = attempts + 1,
+		    last_error = $3,
+		    next_retry_at = $4
+		WHERE id = $1
+		  AND status = 'pending'`,
+		id,
+		status,
+		nullIfEmpty(lastError),
+		nextRetryAt,
+	)
+	return err
+}
+
+func (s *Store) EnqueueDailyReport(ctx context.Context, reportDate time.Time) error {
+	date := localDate(reportDate.In(s.location), s.location)
+	dateString := date.Format("2006-01-02")
+
+	var applied int
+	var skipped int
+	var failures int
+	err := s.db.QueryRowContext(ctx, `
+		SELECT applied_count, skipped_count, error_count
+		FROM daily_apply_stats
+		WHERE date = $1`,
+		date,
+	).Scan(&applied, &skipped, &failures)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+
+	settings, err := s.GetSettings(ctx)
+	if err != nil {
+		return err
+	}
+
+	payload := map[string]any{
+		"date":           dateString,
+		"applied":        applied,
+		"skipped":        skipped,
+		"errors":         failures,
+		"remainingDaily": max(settings.DailyLimit-applied, 0),
+	}
+	return enqueueNotification(ctx, s.db, storage.NotificationKindDailyReport, payload, fmt.Sprintf("%s:%s", storage.NotificationKindDailyReport, dateString))
+}
+
+func (s *Store) QueueTelegramTest(ctx context.Context) (storage.NotificationQueueResult, error) {
+	payload := map[string]any{
+		"createdAt": time.Now().In(s.location).Format(time.RFC3339),
+	}
+	if err := enqueueNotification(ctx, s.db, storage.NotificationKindTelegramTest, payload, ""); err != nil {
+		return storage.NotificationQueueResult{}, err
+	}
+	return storage.NotificationQueueResult{Queued: true}, nil
 }
 
 type settingsScanner interface {
@@ -693,8 +834,12 @@ func (s *Store) activeRun(ctx context.Context) (*storage.Run, error) {
 
 func (s *Store) today() time.Time {
 	now := time.Now().In(s.location)
+	return localDate(now, s.location)
+}
+
+func localDate(now time.Time, location *time.Location) time.Time {
 	year, month, day := now.Date()
-	return time.Date(year, month, day, 0, 0, 0, 0, s.location)
+	return time.Date(year, month, day, 0, 0, 0, 0, location)
 }
 
 func categoryDelta(oldCategory, newCategory, category storage.ResultCategoryValue) int {
@@ -732,4 +877,47 @@ func isUniqueViolation(err error) bool {
 
 func rollback(tx *sql.Tx) {
 	_ = tx.Rollback()
+}
+
+type notificationExecer interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
+
+func (s *Store) enqueueDailyLimitReached(ctx context.Context, execer notificationExecer, run storage.Run) error {
+	dateString := s.today().Format("2006-01-02")
+	payload := map[string]any{
+		"date":       dateString,
+		"runId":      run.ID,
+		"applied":    run.AppliedCount,
+		"dailyLimit": run.SettingsSnapshot.DailyLimit,
+	}
+	return enqueueNotification(
+		ctx,
+		execer,
+		storage.NotificationKindDailyLimitReached,
+		payload,
+		fmt.Sprintf("%s:%s", storage.NotificationKindDailyLimitReached, dateString),
+	)
+}
+
+func enqueueNotification(ctx context.Context, execer notificationExecer, kind storage.NotificationKind, payload any, dedupKey string) error {
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+
+	var dedup sql.NullString
+	if dedupKey != "" {
+		dedup = sql.NullString{String: dedupKey, Valid: true}
+	}
+
+	_, err = execer.ExecContext(ctx, `
+		INSERT INTO notifications_outbox (kind, payload, dedup_key)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (dedup_key) DO NOTHING`,
+		string(kind),
+		raw,
+		dedup,
+	)
+	return err
 }

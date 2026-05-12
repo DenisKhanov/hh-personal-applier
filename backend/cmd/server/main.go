@@ -17,6 +17,7 @@ import (
 	"hh-personal-applier/internal/db"
 	"hh-personal-applier/internal/logging"
 	postgresstore "hh-personal-applier/internal/storage/postgres"
+	"hh-personal-applier/internal/telegram"
 	"hh-personal-applier/migrations"
 )
 
@@ -44,9 +45,29 @@ func main() {
 	}
 	slog.Info("migrations applied")
 
+	store := postgresstore.New(database, cfg.Timezone)
+	telegramClient, err := telegram.NewTelebotClient(cfg.TelegramBotToken, cfg.TelegramOwnerChatID)
+	if err != nil {
+		slog.Error("telegram client init failed", "err", err)
+		os.Exit(1)
+	}
+
+	runtimeCtx, stopRuntime := context.WithCancel(context.Background())
+	defer stopRuntime()
+
+	dispatcher := telegram.NewDispatcher(store, telegramClient, telegram.DispatcherConfig{
+		Interval: 5 * time.Second,
+	})
+	go dispatcher.Run(runtimeCtx)
+
+	dailyReporter := telegram.NewDailyReporter(store, cfg.Timezone, telegram.DailyReporterConfig{
+		Interval: time.Minute,
+	})
+	go dailyReporter.Run(runtimeCtx)
+
 	server := &http.Server{
 		Addr:         cfg.Addr,
-		Handler:      api.NewRouter(cfg.SharedSecret, postgresstore.New(database, cfg.Timezone)),
+		Handler:      api.NewRouter(cfg.SharedSecret, store),
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  60 * time.Second,
@@ -68,12 +89,15 @@ func main() {
 	select {
 	case err := <-serverErrors:
 		if err != nil {
+			stopRuntime()
 			slog.Error("server error", "err", err)
 			os.Exit(1)
 		}
 	case sig := <-shutdownSignals:
 		slog.Info("shutdown signal received", "signal", sig.String())
 	}
+
+	stopRuntime()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

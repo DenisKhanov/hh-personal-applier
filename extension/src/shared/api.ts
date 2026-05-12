@@ -129,6 +129,10 @@ export interface EventResult {
   recorded: boolean;
 }
 
+export interface NotificationQueueResult {
+  queued: boolean;
+}
+
 interface BackendErrorBody {
   error?: {
     code?: string;
@@ -346,6 +350,14 @@ export async function recordErrorEvent(
   event: SafetyEvent
 ): Promise<EventResult> {
   return recordEvent(settings, "/events/error", event);
+}
+
+export async function sendTelegramTest(
+  settings: BootstrapSettings
+): Promise<NotificationQueueResult> {
+  return requestJSON<NotificationQueueResult>(settings, "/telegram/test", {
+    method: "POST"
+  });
 }
 
 export function normalizeBackendUrl(value: string): string {

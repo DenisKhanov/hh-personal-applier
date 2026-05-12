@@ -15,6 +15,7 @@ export const HH_SEARCH_SELECTORS = {
 export const HH_VACANCY_SELECTORS = {
   title: '[data-qa="vacancy-title"]',
   employerName: '[data-qa="vacancy-company-name"]',
+  mainSection: '[data-qa="vacancy-title"], .vacancy-title, .vacancy-body, .vacancy-section',
   applyButton:
     '[data-qa="vacancy-response-link-top"], [data-qa="vacancy-response-link-bottom"]',
   success:

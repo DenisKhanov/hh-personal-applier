@@ -21,6 +21,38 @@ export interface VacancyPageAnalysis {
   notes?: string;
 }
 
+export interface AnalysisProbe {
+  analyze(): VacancyPageAnalysis;
+  delay(ms: number): Promise<void>;
+}
+
+export interface WaitForStableAnalysisOptions {
+  timeoutMs?: number;
+  pollIntervalMs?: number;
+}
+
+const DEFAULT_STABILIZE_TIMEOUT_MS = 3000;
+const DEFAULT_STABILIZE_POLL_MS = 200;
+
+// Retries analyzeVacancyPage while the state is "dom_mismatch" — the page may
+// still be hydrating late after document_idle. Any non-dom_mismatch state is
+// returned immediately so legitimate skips/safety stops are not delayed.
+export async function waitForStableAnalysis(
+  probe: AnalysisProbe,
+  options: WaitForStableAnalysisOptions = {}
+): Promise<VacancyPageAnalysis> {
+  const timeoutMs = options.timeoutMs ?? DEFAULT_STABILIZE_TIMEOUT_MS;
+  const pollIntervalMs = options.pollIntervalMs ?? DEFAULT_STABILIZE_POLL_MS;
+  const deadline = Date.now() + timeoutMs;
+
+  let analysis = probe.analyze();
+  while (Date.now() < deadline && analysis.state === "dom_mismatch") {
+    await probe.delay(pollIntervalMs);
+    analysis = probe.analyze();
+  }
+  return analysis;
+}
+
 type VacancyRoot = Document | Element;
 
 const ELEMENT_NODE = 1;
@@ -85,17 +117,59 @@ export function analyzeVacancyPage(root: VacancyRoot): VacancyPageAnalysis {
 }
 
 export function hasApplyButton(root: VacancyRoot): boolean {
-  const applyButton = root.querySelector(HH_VACANCY_SELECTORS.applyButton);
+  const scope = mainVacancyScope(root);
+  const applyButton = scope.querySelector(HH_VACANCY_SELECTORS.applyButton);
   return applyButton !== null && /откликнуться/i.test(visibleText(applyButton));
 }
 
 export function findApplyButton(root: VacancyRoot): HTMLElement | null {
+  const scope = mainVacancyScope(root);
   const buttons = Array.from(
-    root.querySelectorAll<HTMLElement>(HH_VACANCY_SELECTORS.applyButton)
+    scope.querySelectorAll<HTMLElement>(HH_VACANCY_SELECTORS.applyButton)
   );
   return (
     buttons.find((button) => /откликнуться/i.test(visibleText(button))) ?? null
   );
+}
+
+function mainVacancyScope(root: VacancyRoot): Element {
+  // Find the main vacancy section that contains the title — this excludes
+  // the "Вам подойдут эти вакансии" recommended-vacancies section at the
+  // bottom of the page whose "Откликнуться" buttons belong to other vacancies.
+  const titleElement = root.querySelector(HH_VACANCY_SELECTORS.title);
+  if (titleElement === null) {
+    // No title found — fall back to the whole root (or the first mainSection).
+    const section = root.querySelector(HH_VACANCY_SELECTORS.mainSection);
+    return section ?? (root instanceof Document ? root.documentElement : root);
+  }
+
+  // Walk up from the title to find a section-level ancestor that contains
+  // the apply button. Stop before reaching <body> or <html>.
+  let ancestor: Element | null = titleElement.parentElement;
+  while (ancestor !== null) {
+    if (ancestor.matches(HH_VACANCY_SELECTORS.mainSection)) {
+      return ancestor;
+    }
+    if (ancestor.tagName === "BODY" || ancestor.tagName === "HTML") {
+      break;
+    }
+    ancestor = ancestor.parentElement;
+  }
+
+  // Fallback: return the title's closest section-level parent that contains
+  // an apply button, or the title's parent if nothing else works.
+  let candidate: Element | null = titleElement.parentElement;
+  while (candidate !== null && candidate.parentElement !== null) {
+    if (candidate.parentElement.tagName === "BODY" || candidate.parentElement.tagName === "HTML") {
+      break;
+    }
+    if (candidate.querySelector(HH_VACANCY_SELECTORS.applyButton) !== null) {
+      return candidate;
+    }
+    candidate = candidate.parentElement;
+  }
+
+  return candidate ?? titleElement.parentElement ?? (root instanceof Document ? root.documentElement : root);
 }
 
 export function findResponseSubmitButton(root: VacancyRoot): HTMLElement | null {
