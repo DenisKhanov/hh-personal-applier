@@ -6,6 +6,7 @@ const (
 	ErrorKindValidation ErrorKind = "validation"
 	ErrorKindNotFound   ErrorKind = "not_found"
 	ErrorKindConflict   ErrorKind = "conflict"
+	ErrorKindRateLimit  ErrorKind = "rate_limit"
 )
 
 type OpError struct {
@@ -28,4 +29,8 @@ func NewNotFound(code string, message string) error {
 
 func NewConflict(code string, message string) error {
 	return &OpError{Kind: ErrorKindConflict, Code: code, Message: message}
+}
+
+func NewRateLimited(code string, message string) error {
+	return &OpError{Kind: ErrorKindRateLimit, Code: code, Message: message}
 }

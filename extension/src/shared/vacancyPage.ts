@@ -18,6 +18,7 @@ export interface VacancyPageAnalysis {
   state: VacancyPageState;
   title: string;
   employerName: string;
+  description?: string;
   notes?: string;
 }
 
@@ -62,58 +63,67 @@ const DOCUMENT_NODE = 9;
 export function analyzeVacancyPage(root: VacancyRoot): VacancyPageAnalysis {
   const title = textFrom(root, HH_VACANCY_SELECTORS.title);
   const employerName = textFrom(root, HH_VACANCY_SELECTORS.employerName);
+  const description = vacancyDescription(root);
+  const common =
+    description === ""
+      ? { title, employerName }
+      : { title, employerName, description };
   const pageText = visibleText(root);
 
   if (root.querySelector(HH_VACANCY_SELECTORS.captcha) !== null) {
-    return { state: "captcha", title, employerName };
+    return { state: "captcha", ...common };
   }
   if (isSuccess(root, pageText)) {
-    return { state: "success", title, employerName };
+    return { state: "success", ...common };
   }
   if (requiresLetter(root, pageText)) {
-    return { state: "requires_letter", title, employerName };
+    return { state: "requires_letter", ...common };
+  }
+  if (hasResponseQuestions(root, pageText)) {
+    return {
+      state: "manual_action",
+      ...common,
+      notes: "vacancy response page requires manual answers"
+    };
   }
   if (hasKnownTest(root, pageText)) {
-    return { state: "skipped_test", title, employerName };
+    return { state: "skipped_test", ...common };
   }
   if (isAlreadyApplied(pageText)) {
-    return { state: "skipped_already_applied", title, employerName };
+    return { state: "skipped_already_applied", ...common };
   }
   if (isArchived(root, pageText)) {
-    return { state: "skipped_archived", title, employerName };
+    return { state: "skipped_archived", ...common };
   }
   if (!hasApplyButton(root) && root.querySelector(HH_VACANCY_SELECTORS.login) !== null) {
-    return { state: "login_lost", title, employerName };
+    return { state: "login_lost", ...common };
   }
   if (findResponseSubmitButton(root) !== null) {
-    return { state: "response_ready", title, employerName };
+    return { state: "response_ready", ...common };
   }
   if (hasResponsePopup(root)) {
     return {
       state: "manual_action",
-      title,
-      employerName,
+      ...common,
       notes: "response popup requires manual action"
     };
   }
   if (hasUnknownModal(root)) {
     return {
       state: "unknown_modal",
-      title,
-      employerName,
+      ...common,
       notes: "unknown modal is visible"
     };
   }
   if (!hasApplyButton(root)) {
     return {
       state: "dom_mismatch",
-      title,
-      employerName,
+      ...common,
       notes: "apply button not found"
     };
   }
 
-  return { state: "ready", title, employerName };
+  return { state: "ready", ...common };
 }
 
 export function hasApplyButton(root: VacancyRoot): boolean {
@@ -140,7 +150,7 @@ function mainVacancyScope(root: VacancyRoot): Element {
   if (titleElement === null) {
     // No title found — fall back to the whole root (or the first mainSection).
     const section = root.querySelector(HH_VACANCY_SELECTORS.mainSection);
-    return section ?? (root instanceof Document ? root.documentElement : root);
+    return section ?? (isDocumentRoot(root) ? root.documentElement : root);
   }
 
   // Walk up from the title to find a section-level ancestor that contains
@@ -169,7 +179,7 @@ function mainVacancyScope(root: VacancyRoot): Element {
     candidate = candidate.parentElement;
   }
 
-  return candidate ?? titleElement.parentElement ?? (root instanceof Document ? root.documentElement : root);
+  return candidate ?? titleElement.parentElement ?? (isDocumentRoot(root) ? root.documentElement : root);
 }
 
 export function findResponseSubmitButton(root: VacancyRoot): HTMLElement | null {
@@ -183,6 +193,47 @@ export function findResponseSubmitButton(root: VacancyRoot): HTMLElement | null 
   return uniqueElements([...scopedCandidates, ...fallbackCandidates]).find(
     (candidate) => isEnabled(candidate) && isResponseSubmitText(buttonText(candidate))
   ) ?? null;
+}
+
+export function findCoverLetterTextarea(root: VacancyRoot): HTMLTextAreaElement | null {
+  return root.querySelector<HTMLTextAreaElement>(HH_VACANCY_SELECTORS.coverLetterInput);
+}
+
+export function fillCoverLetterAndSubmit(root: VacancyRoot, body: string): boolean {
+  const textarea = findCoverLetterTextarea(root);
+  const submitButton = findResponseSubmitButton(root);
+  if (textarea === null || submitButton === null) {
+    return false;
+  }
+
+  setNativeTextareaValue(textarea, body);
+  dispatchTextareaEvent(textarea, "input");
+  dispatchTextareaEvent(textarea, "change");
+  submitButton.click();
+  return true;
+}
+
+export function vacancyDescription(root: VacancyRoot): string {
+  return textFrom(root, HH_VACANCY_SELECTORS.description);
+}
+
+function dispatchTextareaEvent(textarea: HTMLTextAreaElement, type: string): void {
+  const eventCtor = textarea.ownerDocument.defaultView?.Event ?? Event;
+  textarea.dispatchEvent(new eventCtor(type, { bubbles: true }));
+}
+
+function setNativeTextareaValue(textarea: HTMLTextAreaElement, value: string): void {
+  const prototype = textarea.ownerDocument.defaultView?.HTMLTextAreaElement?.prototype;
+  const descriptor =
+    prototype === undefined
+      ? undefined
+      : Object.getOwnPropertyDescriptor(prototype, "value");
+
+  if (descriptor?.set !== undefined) {
+    descriptor.set.call(textarea, value);
+    return;
+  }
+  textarea.value = value;
 }
 
 export function visibleText(root: VacancyRoot | null): string {
@@ -259,6 +310,39 @@ function hasKnownTest(root: VacancyRoot, pageText: string): boolean {
       pageText
     )
   );
+}
+
+function hasResponseQuestions(root: VacancyRoot, pageText: string): boolean {
+  const hasQuestionField =
+    root.querySelector(HH_VACANCY_SELECTORS.responseQuestion) !== null;
+  const mentionsEmployerQuestions =
+    /вопросы\s+работодателя|ответьте\s+на\s+вопросы|ответьте\s+на\s+вопрос/i.test(
+      pageText
+    );
+  if (!hasQuestionField && !mentionsEmployerQuestions) {
+    return false;
+  }
+
+  const hasResponseForm =
+    root.querySelector(
+      '[data-qa*="vacancy-response-form"], [data-qa*="vacancy-response-question"], [data-qa*="response-question"], form[action*="/applicant/vacancy_response"]'
+    ) !== null;
+  return hasResponseForm || isVacancyResponseDocument(root);
+}
+
+function isVacancyResponseDocument(root: VacancyRoot): boolean {
+  const document = isDocumentRoot(root) ? root : root.ownerDocument;
+  const href = document?.location?.href ?? "";
+  try {
+    const url = new URL(href);
+    return url.hostname === "hh.ru" && url.pathname === "/applicant/vacancy_response";
+  } catch {
+    return href.includes("/applicant/vacancy_response");
+  }
+}
+
+function isDocumentRoot(root: VacancyRoot): root is Document {
+  return root.nodeType === DOCUMENT_NODE;
 }
 
 function isAlreadyApplied(pageText: string): boolean {

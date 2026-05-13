@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -324,6 +325,45 @@ func TestVacancyResultRequiresManualOverrideForUnknownAfterClick(t *testing.T) {
 	}
 }
 
+func TestVacancyResultMixedStatusesUpdateStatsCategories(t *testing.T) {
+	store := newFakeStore()
+	store.activeRun = &storage.Run{
+		ID:               "run-1",
+		Status:           storage.RunStatusRunning,
+		SettingsSnapshot: store.settings,
+	}
+	mux := api.NewRouter(testSecret, store)
+
+	statuses := []string{
+		"applied",
+		"applied",
+		"skipped_cover_letter",
+		"manual_action",
+		"unknown_after_click",
+		"error",
+	}
+	for index, status := range statuses {
+		response := doJSON(t, mux, http.MethodPost, "/vacancies/result", map[string]any{
+			"runId":     "run-1",
+			"vacancyId": fmt.Sprintf("vacancy-%d", index+1),
+			"status":    status,
+		})
+		if response.Code != http.StatusOK {
+			t.Fatalf("expected %s result 200, got %d: %s", status, response.Code, response.Body.String())
+		}
+	}
+
+	statsResponse := doJSON(t, mux, http.MethodGet, "/stats/today", nil)
+	if statsResponse.Code != http.StatusOK {
+		t.Fatalf("expected stats 200, got %d: %s", statsResponse.Code, statsResponse.Body.String())
+	}
+	var stats storage.TodayStats
+	decodeJSON(t, statsResponse, &stats)
+	if stats.Applied != 2 || stats.Skipped != 2 || stats.Errors != 2 {
+		t.Fatalf("expected mixed stats applied=2 skipped=2 errors=2, got %+v", stats)
+	}
+}
+
 func TestStatsAndEventsHandlers(t *testing.T) {
 	store := newFakeStore()
 	store.activeRun = &storage.Run{
@@ -353,6 +393,40 @@ func TestStatsAndEventsHandlers(t *testing.T) {
 	}
 	if len(store.events) != 1 || store.events[0].Kind != storage.EventKindCaptcha {
 		t.Fatalf("expected captcha event, got %+v", store.events)
+	}
+}
+
+func TestNonBlockingErrorEventCarriesVacancyURLAndDoesNotPauseRun(t *testing.T) {
+	store := newFakeStore()
+	store.activeRun = &storage.Run{
+		ID:               "run-1",
+		Status:           storage.RunStatusRunning,
+		SettingsSnapshot: store.settings,
+	}
+	mux := api.NewRouter(testSecret, store)
+
+	response := doJSON(t, mux, http.MethodPost, "/events/error", map[string]any{
+		"runId":       "run-1",
+		"vacancyId":   "42",
+		"vacancyUrl":  "https://hh.ru/vacancy/42",
+		"message":     "Unknown state after click",
+		"nonBlocking": true,
+		"details": map[string]any{
+			"status": "unknown_after_click",
+		},
+	})
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected non-blocking error event 200, got %d: %s", response.Code, response.Body.String())
+	}
+	if store.activeRun.Status != storage.RunStatusRunning {
+		t.Fatalf("expected run to stay running, got %s", store.activeRun.Status)
+	}
+	if len(store.events) != 1 {
+		t.Fatalf("expected one event, got %+v", store.events)
+	}
+	event := store.events[0]
+	if !event.NonBlocking || event.VacancyURL != "https://hh.ru/vacancy/42" {
+		t.Fatalf("expected non-blocking event with URL, got %+v", event)
 	}
 }
 

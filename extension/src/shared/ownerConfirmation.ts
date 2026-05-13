@@ -130,11 +130,11 @@ export function createOwnerConfirmationController(
 
         timeoutHandle = deps.setTimeout(() => {
           void cleanup().then(() => {
-            deps.log?.("owner confirmation timed out, treating as skip", {
+            deps.log?.("owner confirmation timed out, treating as confirm", {
               vacancyId: view.vacancyId,
               timeoutMs
             });
-            resolve("skip");
+            resolve("confirm");
           }, reject);
         }, timeoutMs);
 

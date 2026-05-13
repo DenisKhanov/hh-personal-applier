@@ -108,7 +108,7 @@ test("request resolves to 'skip' when decide is called with skip", async () => {
   assert.equal(decision, "skip");
 });
 
-test("request resolves to 'skip' on timeout and logs", async () => {
+test("request auto-confirms on timeout after 30 seconds and logs", async () => {
   const timer = makeFakeTimer();
   const logs: Array<{ message: string; data: Record<string, unknown> }> = [];
   const controller = createOwnerConfirmationController({
@@ -119,13 +119,13 @@ test("request resolves to 'skip' on timeout and logs", async () => {
     }
   });
 
-  const pending = controller.request(candidate, new AbortController().signal, 300000);
-  assert.equal(timer.lastDelayMs(), 300000);
+  const pending = controller.request(candidate, new AbortController().signal, 30_000);
+  assert.equal(timer.lastDelayMs(), 30_000);
 
   timer.fire();
   const decision = await pending;
 
-  assert.equal(decision, "skip");
+  assert.equal(decision, "confirm");
   assert.equal(logs.length, 1);
   assert.equal(logs[0]?.data["vacancyId"], "132288118");
   assert.equal(controller.getPending(), null);
@@ -150,7 +150,7 @@ test("request clears persisted confirmation on timeout", async () => {
   );
   timer.fire();
 
-  assert.equal(await pending, "skip");
+  assert.equal(await pending, "confirm");
   assert.equal(clearCalls, 1);
 });
 

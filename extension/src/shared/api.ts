@@ -121,7 +121,9 @@ export interface TodayStats {
 export interface SafetyEvent {
   runId?: string;
   vacancyId?: string;
+  vacancyUrl?: string;
   message?: string;
+  nonBlocking?: boolean;
   details?: Record<string, unknown>;
 }
 
@@ -131,6 +133,35 @@ export interface EventResult {
 
 export interface NotificationQueueResult {
   queued: boolean;
+}
+
+export type CoverLetterStatus =
+  | "pending_approval"
+  | "approved"
+  | "skipped"
+  | "expired";
+
+export type CoverLetterLanguage = "ru" | "en";
+
+export interface CoverLetter {
+  id: string;
+  vacancyId: string;
+  vacancyTitle?: string;
+  vacancyUrl?: string;
+  body?: string;
+  language: CoverLetterLanguage;
+  status: CoverLetterStatus;
+  expiresAt: string;
+  createdAt?: string;
+  approvalQueued?: boolean;
+}
+
+export interface CoverLetterRequest {
+  runId?: string;
+  vacancyId: string;
+  vacancyTitle: string;
+  vacancyDescription: string;
+  vacancyUrl?: string;
 }
 
 interface BackendErrorBody {
@@ -358,6 +389,27 @@ export async function sendTelegramTest(
   return requestJSON<NotificationQueueResult>(settings, "/telegram/test", {
     method: "POST"
   });
+}
+
+export async function requestCoverLetter(
+  settings: BootstrapSettings,
+  request: CoverLetterRequest
+): Promise<CoverLetter> {
+  return requestJSON<CoverLetter>(settings, "/cover_letters/request", {
+    method: "POST",
+    body: request
+  });
+}
+
+export async function getCoverLetter(
+  settings: BootstrapSettings,
+  vacancyId: string
+): Promise<CoverLetter> {
+  return requestJSON<CoverLetter>(
+    settings,
+    `/cover_letters/${encodeURIComponent(vacancyId)}`,
+    { method: "GET" }
+  );
 }
 
 export function normalizeBackendUrl(value: string): string {

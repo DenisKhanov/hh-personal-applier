@@ -76,10 +76,12 @@ type statsOutput struct {
 
 type eventInput struct {
 	Body struct {
-		RunID     string         `json:"runId,omitempty"`
-		VacancyID string         `json:"vacancyId,omitempty"`
-		Message   string         `json:"message,omitempty"`
-		Details   map[string]any `json:"details,omitempty"`
+		RunID       string         `json:"runId,omitempty"`
+		VacancyID   string         `json:"vacancyId,omitempty"`
+		VacancyURL  string         `json:"vacancyUrl,omitempty"`
+		Message     string         `json:"message,omitempty"`
+		NonBlocking bool           `json:"nonBlocking,omitempty"`
+		Details     map[string]any `json:"details,omitempty"`
 	}
 }
 
@@ -289,11 +291,13 @@ func registerEvent(api huma.API, store storage.Store, kind storage.EventKind, pa
 		Tags:        []string{"events"},
 	}, func(ctx context.Context, input *eventInput) (*eventOutput, error) {
 		event := storage.Event{
-			Kind:      kind,
-			RunID:     input.Body.RunID,
-			VacancyID: input.Body.VacancyID,
-			Message:   input.Body.Message,
-			Details:   input.Body.Details,
+			Kind:        kind,
+			RunID:       input.Body.RunID,
+			VacancyID:   input.Body.VacancyID,
+			VacancyURL:  input.Body.VacancyURL,
+			Message:     input.Body.Message,
+			NonBlocking: input.Body.NonBlocking,
+			Details:     input.Body.Details,
 		}
 		if err := store.RecordEvent(ctx, event); err != nil {
 			return nil, apiError(err)

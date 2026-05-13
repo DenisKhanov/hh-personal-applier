@@ -88,6 +88,8 @@ func apiError(err error) error {
 			return newStatusError(http.StatusNotFound, opErr.Code, opErr.Message)
 		case storage.ErrorKindConflict:
 			return newStatusError(http.StatusConflict, opErr.Code, opErr.Message)
+		case storage.ErrorKindRateLimit:
+			return newStatusError(http.StatusTooManyRequests, opErr.Code, opErr.Message)
 		}
 	}
 

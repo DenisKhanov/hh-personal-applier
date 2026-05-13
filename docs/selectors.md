@@ -2,7 +2,7 @@
 
 Selector map for `hh.ru` DOM parsing.
 
-Last checked: 2026-05-10.
+Last checked: 2026-05-12.
 
 Check source: public HTML GET of `https://hh.ru/search/vacancy?area=1&text=go`
 and spot checks for query pages with `тестовое задание` / `архив`. Final
@@ -44,6 +44,7 @@ because response modals are auth-dependent.
 |---|---|---|
 | Title | `[data-qa="vacancy-title"]` | Cached into `/vacancies/result` if content page exposes it. |
 | Employer | `[data-qa="vacancy-company-name"]` | Cached into `/vacancies/result`. |
+| Description | `[data-qa="vacancy-description"], [data-qa="vacancy-section-description"], [data-qa*="vacancy-description"]` | Sent to backend only for Stage 7 cover-letter generation. Falls back to the vacancy title if absent. |
 | Apply button | `[data-qa="vacancy-response-link-top"], [data-qa="vacancy-response-link-bottom"]` | Clicked only by `content/vacancy.ts` after background records `/attempts/start`. |
 | Response popup | `[data-qa*="vacancy-response-popup"]`, `[role="dialog"]`, or `.bloko-modal` with visible response/resume text | Normal Stage 5 second step after the first vacancy-page click. |
 | Response submit button | `[data-qa="vacancy-response-submit-popup"]`, `[data-qa*="vacancy-response-submit"]`, `[data-qa*="response-submit"]`, or enabled button text `Откликнуться` / `Отправить отклик` / `Подтвердить` inside response popup | Clicked only inside a known response popup. No resume choice is made by the extension. |
@@ -51,8 +52,10 @@ because response modals are auth-dependent.
 | Success | `[data-qa*="vacancy-response-success"], [data-qa*="response-success"]` or visible text `Отклик отправлен` / `Вы откликнулись` | Text scan excludes `script`, `style`, `template`, and hidden nodes to avoid translation bundle false positives. |
 | CAPTCHA | `[data-qa*="captcha"], form[action*="captcha"], iframe[src*="captcha"]` | Safety stop: `/events/captcha` + local Chrome notification. |
 | Login lost | No apply button plus `[data-qa="login"]` or `[data-qa="mainmenu_profile-link"]` | Safety stop: `/events/login_lost` + local Chrome notification. |
-| Required cover letter | `[data-qa="vacancy-response-popup-form-letter-input"][required]`, `[data-qa="vacancy-response-popup-form-letter-input"][aria-required="true"]`, required letter field markers, or visible text `Сопроводительное письмо обязательное` / `Требуется сопроводительное письмо` | Optional cover-letter textarea in the normal response popup is not enough to skip. Stage 5 records `skipped_cover_letter` only for mandatory letters; LLM approval starts in Stage 7. |
+| Required cover letter | `[data-qa="vacancy-response-popup-form-letter-input"][required]`, `[data-qa="vacancy-response-popup-form-letter-input"][aria-required="true"]`, required letter field markers, or visible text `Сопроводительное письмо обязательное` / `Требуется сопроводительное письмо` | Optional cover-letter textarea in the normal response popup is not enough to skip. Stage 7 requests backend generation and waits for Telegram approval before submit. |
+| Cover letter input | `[data-qa="vacancy-response-popup-form-letter-input"], textarea[name*="letter"], textarea[id*="letter"]` | Filled only after backend returns an approved cover letter. |
 | Archived | `[data-qa*="archiv"], [data-qa*="archive"]` or visible text `Вакансия в архиве` | Records `skipped_archived`. |
 | Already applied | Visible text `Вы уже откликались` / `Отклик уже отправлен` | Records `skipped_already_applied`. |
 | Test/questions | `[data-qa*="response-test"], [data-qa*="test-required"]` or visible text `тестовое задание` / `вопросы работодателя` | Records `skipped_test`. |
-| Unknown modal | `[role="dialog"], [data-qa*="popup"], .bloko-modal` with non-empty visible text and no known response submit / required-letter / test signal | Records `unknown_after_click`, pauses through `/events/error`. |
+| Response questions | `[data-qa*="vacancy-response-question"], [data-qa*="response-question"], textarea[name*="question"], input[name*="question"]` on `/applicant/vacancy_response` or inside a response form | Records `manual_action`, queues a non-blocking Telegram alert with the vacancy URL, then continues. |
+| Unknown modal | `[role="dialog"], [data-qa*="popup"], .bloko-modal` with non-empty visible text and no known response submit / required-letter / test signal | Safety stop: `/events/error`. Plain no-change-after-click fallback records `unknown_after_click`, queues a non-blocking Telegram alert, and continues. |

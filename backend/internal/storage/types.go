@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"encoding/json"
+	"time"
 )
 
 type Store interface {
@@ -261,9 +262,85 @@ const (
 )
 
 type Event struct {
-	Kind      EventKind      `json:"kind"`
-	RunID     string         `json:"runId,omitempty"`
-	VacancyID string         `json:"vacancyId,omitempty"`
-	Message   string         `json:"message,omitempty"`
-	Details   map[string]any `json:"details,omitempty"`
+	Kind        EventKind      `json:"kind"`
+	RunID       string         `json:"runId,omitempty"`
+	VacancyID   string         `json:"vacancyId,omitempty"`
+	VacancyURL  string         `json:"vacancyUrl,omitempty"`
+	Message     string         `json:"message,omitempty"`
+	NonBlocking bool           `json:"nonBlocking,omitempty"`
+	Details     map[string]any `json:"details,omitempty"`
+}
+
+type CoverLetterLanguage string
+
+const (
+	CoverLetterLanguageRU CoverLetterLanguage = "ru"
+	CoverLetterLanguageEN CoverLetterLanguage = "en"
+)
+
+type CoverLetterStatus string
+
+const (
+	CoverLetterStatusPendingApproval CoverLetterStatus = "pending_approval"
+	CoverLetterStatusApproved        CoverLetterStatus = "approved"
+	CoverLetterStatusSkipped         CoverLetterStatus = "skipped"
+	CoverLetterStatusExpired         CoverLetterStatus = "expired"
+)
+
+type CoverLetter struct {
+	ID             string              `json:"id"`
+	VacancyID      string              `json:"vacancyId"`
+	VacancyTitle   string              `json:"vacancyTitle,omitempty"`
+	VacancyURL     string              `json:"vacancyUrl,omitempty"`
+	Body           string              `json:"body,omitempty"`
+	Language       CoverLetterLanguage `json:"language"`
+	Status         CoverLetterStatus   `json:"status"`
+	ExpiresAt      time.Time           `json:"expiresAt"`
+	CreatedAt      time.Time           `json:"createdAt,omitempty"`
+	ApprovalQueued bool                `json:"approvalQueued,omitempty"`
+}
+
+type CoverLetterRequest struct {
+	RunID              string `json:"runId,omitempty"`
+	VacancyID          string `json:"vacancyId,omitempty"`
+	VacancyTitle       string `json:"vacancyTitle,omitempty"`
+	VacancyDescription string `json:"vacancyDescription,omitempty"`
+	VacancyURL         string `json:"vacancyUrl,omitempty"`
+}
+
+type CoverLetterCreate struct {
+	VacancyID    string
+	VacancyTitle string
+	VacancyURL   string
+	Body         string
+	Language     CoverLetterLanguage
+	Status       CoverLetterStatus
+	ExpiresAt    time.Time
+}
+
+type CoverLetterApprovalNotification struct {
+	VacancyID    string              `json:"vacancyId"`
+	VacancyTitle string              `json:"vacancyTitle,omitempty"`
+	VacancyURL   string              `json:"vacancyUrl,omitempty"`
+	Body         string              `json:"body"`
+	Language     CoverLetterLanguage `json:"language"`
+	ExpiresAt    time.Time           `json:"expiresAt"`
+}
+
+type CoverLetterCallbackAction string
+
+const (
+	CoverLetterCallbackApprove CoverLetterCallbackAction = "approve"
+	CoverLetterCallbackEdit    CoverLetterCallbackAction = "edit"
+	CoverLetterCallbackSkip    CoverLetterCallbackAction = "skip"
+)
+
+type CoverLetterCallback struct {
+	VacancyID string                    `json:"vacancyId"`
+	Action    CoverLetterCallbackAction `json:"action"`
+}
+
+type CoverLetterCallbackResult struct {
+	Changed bool        `json:"changed"`
+	Letter  CoverLetter `json:"letter"`
 }

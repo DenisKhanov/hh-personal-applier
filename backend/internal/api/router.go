@@ -10,6 +10,10 @@ import (
 )
 
 func NewRouter(secret string, store storage.Store) http.Handler {
+	return NewRouterWithCoverLetters(secret, store, nil)
+}
+
+func NewRouterWithCoverLetters(secret string, store storage.Store, coverLetters CoverLetterService) http.Handler {
 	installHumaErrorShape()
 
 	mux := http.NewServeMux()
@@ -23,6 +27,9 @@ func NewRouter(secret string, store storage.Store) http.Handler {
 	registerHealth(api)
 	if store != nil {
 		registerStage3(api, store)
+	}
+	if coverLetters != nil {
+		registerStage7(api, coverLetters)
 	}
 
 	return SecretMiddleware(secret)(mux)

@@ -7,6 +7,8 @@ export const POPUP_STOP_RUN = "HH_POPUP_STOP_RUN";
 export const POPUP_GET_STATUS = "HH_POPUP_GET_STATUS";
 export const POPUP_CONFIRM_RESPONSE = "HH_POPUP_CONFIRM_RESPONSE";
 export const VACANCY_APPLY_SIMPLE_REQUEST = "HH_VACANCY_APPLY_SIMPLE_REQUEST";
+export const VACANCY_SUBMIT_COVER_LETTER_REQUEST =
+  "HH_VACANCY_SUBMIT_COVER_LETTER_REQUEST";
 
 export interface SearchCandidatesParsedMessage {
   type: typeof SEARCH_CANDIDATES_PARSED;
@@ -58,12 +60,20 @@ export interface VacancyApplySimpleRequestMessage {
   vacancyId: string;
 }
 
+export interface VacancySubmitCoverLetterRequestMessage {
+  type: typeof VACANCY_SUBMIT_COVER_LETTER_REQUEST;
+  runId: string;
+  vacancyId: string;
+  body: string;
+}
+
 export type VacancyApplySimpleResponse =
   | {
       ok: true;
       status: VacancyResultStatus;
       vacancyTitle: string;
       employerName: string;
+      vacancyDescription?: string;
       notes?: string;
     }
   | {
@@ -75,6 +85,7 @@ export type VacancyApplySimpleResponse =
         | "unknown_modal";
       vacancyTitle: string;
       employerName: string;
+      vacancyDescription?: string;
       message: string;
       details?: Record<string, unknown>;
     };
@@ -86,7 +97,8 @@ export type ExtensionMessage =
   | PopupStopRunMessage
   | PopupGetStatusMessage
   | PopupConfirmResponseMessage
-  | VacancyApplySimpleRequestMessage;
+  | VacancyApplySimpleRequestMessage
+  | VacancySubmitCoverLetterRequestMessage;
 
 export function isSearchCandidatesParsedMessage(
   message: unknown
@@ -155,6 +167,22 @@ export function isVacancyApplySimpleRequestMessage(
     value.type === VACANCY_APPLY_SIMPLE_REQUEST &&
     typeof value.runId === "string" &&
     typeof value.vacancyId === "string"
+  );
+}
+
+export function isVacancySubmitCoverLetterRequestMessage(
+  message: unknown
+): message is VacancySubmitCoverLetterRequestMessage {
+  if (typeof message !== "object" || message === null) {
+    return false;
+  }
+
+  const value = message as Partial<VacancySubmitCoverLetterRequestMessage>;
+  return (
+    value.type === VACANCY_SUBMIT_COVER_LETTER_REQUEST &&
+    typeof value.runId === "string" &&
+    typeof value.vacancyId === "string" &&
+    typeof value.body === "string"
   );
 }
 

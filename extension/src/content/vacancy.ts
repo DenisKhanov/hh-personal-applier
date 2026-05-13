@@ -1,11 +1,13 @@
 import {
   isVacancyApplySimpleRequestMessage,
+  isVacancySubmitCoverLetterRequestMessage,
   type VacancyApplySimpleResponse
 } from "../shared/messages";
 import { isHhVacancyRelatedUrl } from "../shared/pageGuards";
 import type { VacancyResultStatus } from "../shared/api";
 import {
   analyzeVacancyPage,
+  fillCoverLetterAndSubmit,
   findApplyButton,
   findResponseSubmitButton,
   waitForStableAnalysis,
@@ -17,7 +19,23 @@ const APPLY_OUTCOME_POLL_MS = 250;
 
 chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) => {
   if (!isVacancyApplySimpleRequestMessage(message)) {
-    return false;
+    if (!isVacancySubmitCoverLetterRequestMessage(message)) {
+      return false;
+    }
+
+    void submitCoverLetter(message.body)
+      .then(sendResponse)
+      .catch((error: unknown) => {
+        const analysis = analyzeVacancyPage(document);
+        sendResponse(
+          safetyResponse(
+            "unknown_modal",
+            analysis,
+            error instanceof Error ? error.message : "Cover letter submit failed"
+          )
+        );
+      });
+    return true;
   }
 
   void applySimpleVacancy()
@@ -74,13 +92,11 @@ async function applySimpleVacancy(): Promise<VacancyApplySimpleResponse> {
       return afterSubmitOutcome;
     }
 
-    return {
-      ok: true,
-      status: "unknown_after_click",
-      vacancyTitle: afterSubmit.title,
-      employerName: afterSubmit.employerName,
-      notes: "no known success or skip state after response submit"
-    };
+    return okResponse(
+      "applied",
+      afterSubmit,
+      "response submit clicked; no error state detected"
+    );
   }
 
   const applyButton = findApplyButton(document);
@@ -114,13 +130,11 @@ async function applySimpleVacancy(): Promise<VacancyApplySimpleResponse> {
       return afterSubmitOutcome;
     }
 
-    return {
-      ok: true,
-      status: "unknown_after_click",
-      vacancyTitle: afterSubmit.title,
-      employerName: afterSubmit.employerName,
-      notes: "no known success or skip state after response submit"
-    };
+    return okResponse(
+      "applied",
+      afterSubmit,
+      "response submit clicked; no error state detected"
+    );
   }
 
   return {
@@ -130,6 +144,36 @@ async function applySimpleVacancy(): Promise<VacancyApplySimpleResponse> {
     employerName: afterClick.employerName,
     notes: "no known success or skip state after click"
   };
+}
+
+async function submitCoverLetter(body: string): Promise<VacancyApplySimpleResponse> {
+  const beforeSubmit = analyzeVacancyPage(document);
+  if (beforeSubmit.state !== "requires_letter" && beforeSubmit.state !== "response_ready") {
+    const beforeSubmitOutcome = outcomeFromAnalysis(beforeSubmit);
+    if (beforeSubmitOutcome !== null) {
+      return beforeSubmitOutcome;
+    }
+  }
+
+  if (!fillCoverLetterAndSubmit(document, body)) {
+    return safetyResponse(
+      "dom_mismatch",
+      beforeSubmit,
+      "cover letter textarea or submit button not found"
+    );
+  }
+
+  const afterSubmit = await waitForSubmitOutcome();
+  const afterSubmitOutcome = outcomeFromAnalysis(afterSubmit);
+  if (afterSubmitOutcome !== null) {
+    return afterSubmitOutcome;
+  }
+
+  return okResponse(
+    "applied",
+    afterSubmit,
+    "cover letter submit clicked; no error state detected"
+  );
 }
 
 async function waitForPostClickOutcome(): Promise<VacancyPageAnalysis> {
@@ -153,7 +197,11 @@ async function waitForSubmitOutcome(): Promise<VacancyPageAnalysis> {
 
   while (Date.now() < deadline) {
     lastAnalysis = analyzeVacancyPage(document);
-    if (lastAnalysis.state !== "ready" && lastAnalysis.state !== "response_ready") {
+    if (
+      lastAnalysis.state !== "ready" &&
+      lastAnalysis.state !== "response_ready" &&
+      lastAnalysis.state !== "requires_letter"
+    ) {
       return lastAnalysis;
     }
     await delay(APPLY_OUTCOME_POLL_MS);
@@ -221,6 +269,9 @@ function okResponse(
     status,
     vacancyTitle: analysis.title,
     employerName: analysis.employerName,
+    ...(analysis.description === undefined
+      ? {}
+      : { vacancyDescription: analysis.description }),
     ...(notes === undefined ? {} : { notes })
   };
 }
@@ -235,6 +286,9 @@ function safetyResponse(
     safety,
     vacancyTitle: analysis.title,
     employerName: analysis.employerName,
+    ...(analysis.description === undefined
+      ? {}
+      : { vacancyDescription: analysis.description }),
     message,
     details: {
       state: analysis.state,

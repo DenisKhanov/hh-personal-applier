@@ -1,12 +1,14 @@
 import {
   BackendApiError,
   filterCandidates,
+  getCoverLetter,
   getTodayStats,
   loadBootstrapSettings,
   recordCaptchaEvent,
   recordErrorEvent,
   recordLoginLostEvent,
   recordVacancyResult,
+  requestCoverLetter,
   startAttempt,
   startRun,
   stopRun,
@@ -15,11 +17,13 @@ import {
   type CandidateItem,
   type CandidateRejection,
   type CandidatesResult,
+  type CoverLetter,
   type SafetyEvent
 } from "../shared/api";
 import {
   SEARCH_PARSE_REQUEST,
   VACANCY_APPLY_SIMPLE_REQUEST,
+  VACANCY_SUBMIT_COVER_LETTER_REQUEST,
   isPopupConfirmResponseMessage,
   isPopupGetStatusMessage,
   isPopupStartRunMessage,
@@ -34,6 +38,10 @@ import {
   createOwnerConfirmationController,
   type StoredOwnerConfirmation
 } from "../shared/ownerConfirmation";
+import {
+  notificationForContinuableResult,
+  shouldNotifyContinuableResult
+} from "../shared/applyResultPolicy";
 import { isHhSearchVacancyUrl } from "../shared/pageGuards";
 import { completionReason } from "../shared/runPolicy";
 import { sendMessageWithInjection as sendMessageWithInjectedScript } from "../shared/tabMessaging";
@@ -75,7 +83,8 @@ class SafetyStopError extends Error {
   }
 }
 
-const OWNER_CONFIRMATION_TIMEOUT_MS = 5 * 60 * 1000;
+const OWNER_CONFIRMATION_TIMEOUT_MS = 30 * 1000;
+const COVER_LETTER_POLL_MS = 5000;
 const PENDING_OWNER_CONFIRMATION_KEY = "pendingOwnerConfirmation";
 
 const ownerConfirmation = createOwnerConfirmationController({
@@ -95,6 +104,7 @@ let state: WorkerState = {
   message: "Idle"
 };
 let latestSearchSnapshot: SearchSnapshot | null = null;
+const llmRateLimitedRuns = new Set<string>();
 
 chrome.runtime.onInstalled.addListener(() => {
   console.log("HH Personal Applier background service worker installed");
@@ -417,6 +427,11 @@ async function processCandidate(
     throw new SafetyStopError(`Paused: ${response.message}`);
   }
 
+  if (response.status === "skipped_cover_letter") {
+    await handleCoverLetterFlow(settings, run, tabId, candidate, response, signal);
+    return;
+  }
+
   await recordVacancyResult(settings, {
     runId,
     vacancyId: candidate.vacancyId,
@@ -427,18 +442,174 @@ async function processCandidate(
     ...(response.notes === undefined ? {} : { notes: response.notes })
   });
 
-  if (response.status === "unknown_after_click") {
-    await recordErrorEvent(settings, {
-      runId,
-      vacancyId: candidate.vacancyId,
-      message: "Unknown state after click",
-      details: { notes: response.notes ?? "" }
-    });
+  if (shouldNotifyContinuableResult(response.status)) {
+    await recordErrorEvent(
+      settings,
+      notificationForContinuableResult({
+        runId,
+        vacancyId: candidate.vacancyId,
+        status: response.status,
+        vacancyUrl: candidate.vacancyUrl,
+        notes: response.notes
+      })
+    );
     await createLocalNotification(
       "HH Personal Applier",
-      `Unknown vacancy state after click: ${candidate.vacancyId}. Skipped, continuing.`
+      `${response.status}: ${candidate.vacancyId}. Continuing.`
     );
-    // Do NOT throw SafetyStopError — continue to the next vacancy instead.
+  }
+}
+
+async function handleCoverLetterFlow(
+  settings: BootstrapSettings,
+  run: ApplyRun,
+  tabId: number,
+  candidate: CandidateItem,
+  response: Extract<VacancyApplySimpleResponse, { ok: true }>,
+  signal: AbortSignal
+): Promise<void> {
+  const runId = run.runId;
+  if (llmRateLimitedRuns.has(runId)) {
+    await recordVacancyResult(settings, {
+      runId,
+      vacancyId: candidate.vacancyId,
+      status: "skipped_cover_letter",
+      vacancyTitle: response.vacancyTitle || candidate.title,
+      employerName: response.employerName || candidate.employerName,
+      vacancyUrl: candidate.vacancyUrl,
+      notes: "LLM rate limited earlier in this run"
+    });
+    return;
+  }
+
+  state = {
+    ...state,
+    message: `Generating cover letter for ${candidate.vacancyId}`
+  };
+
+  let letter: CoverLetter;
+  try {
+    letter = await requestCoverLetter(settings, {
+      runId,
+      vacancyId: candidate.vacancyId,
+      vacancyTitle: response.vacancyTitle || candidate.title,
+      vacancyDescription:
+        response.vacancyDescription?.trim() || candidate.title,
+      vacancyUrl: candidate.vacancyUrl
+    });
+  } catch (error: unknown) {
+    if (error instanceof BackendApiError && error.code === "llm_rate_limited") {
+      llmRateLimitedRuns.add(runId);
+      await recordVacancyResult(settings, {
+        runId,
+        vacancyId: candidate.vacancyId,
+        status: "skipped_cover_letter",
+        vacancyTitle: response.vacancyTitle || candidate.title,
+        employerName: response.employerName || candidate.employerName,
+        vacancyUrl: candidate.vacancyUrl,
+        notes: "LLM rate limited"
+      });
+      return;
+    }
+    throw error;
+  }
+
+  if (letter.status === "pending_approval") {
+    state = {
+      ...state,
+      message: `Waiting for Telegram approval for ${candidate.vacancyId}`
+    };
+    letter = await pollCoverLetterApproval(settings, candidate.vacancyId, signal);
+  }
+
+  if (letter.status === "skipped" || letter.status === "expired") {
+    await recordVacancyResult(settings, {
+      runId,
+      vacancyId: candidate.vacancyId,
+      status: "skipped_cover_letter",
+      vacancyTitle: response.vacancyTitle || candidate.title,
+      employerName: response.employerName || candidate.employerName,
+      vacancyUrl: candidate.vacancyUrl,
+      notes: `cover letter approval ${letter.status}`
+    });
+    return;
+  }
+
+  if (letter.status !== "approved" || letter.body === undefined || letter.body.trim() === "") {
+    await recordVacancyResult(settings, {
+      runId,
+      vacancyId: candidate.vacancyId,
+      status: "error",
+      vacancyTitle: response.vacancyTitle || candidate.title,
+      employerName: response.employerName || candidate.employerName,
+      vacancyUrl: candidate.vacancyUrl,
+      notes: "cover letter approval returned no approved body"
+    });
+    return;
+  }
+
+  state = {
+    ...state,
+    message: `Submitting cover letter for ${candidate.vacancyId}`
+  };
+  const submitResponse = await requestCoverLetterSubmit(
+    tabId,
+    runId,
+    candidate.vacancyId,
+    letter.body,
+    signal
+  );
+  ensureNotAborted(signal);
+
+  if (!submitResponse.ok) {
+    await recordVacancyResult(settings, {
+      runId,
+      vacancyId: candidate.vacancyId,
+      status: "error",
+      vacancyTitle: submitResponse.vacancyTitle || candidate.title,
+      employerName: submitResponse.employerName || candidate.employerName,
+      vacancyUrl: candidate.vacancyUrl,
+      notes: submitResponse.message
+    });
+    await recordSafetyStop(settings, runId, candidate.vacancyId, submitResponse);
+    throw new SafetyStopError(`Paused: ${submitResponse.message}`);
+  }
+
+  await recordVacancyResult(settings, {
+    runId,
+    vacancyId: candidate.vacancyId,
+    status: submitResponse.status,
+    vacancyTitle: submitResponse.vacancyTitle || candidate.title,
+    employerName: submitResponse.employerName || candidate.employerName,
+    vacancyUrl: candidate.vacancyUrl,
+    ...(submitResponse.notes === undefined ? {} : { notes: submitResponse.notes })
+  });
+  if (shouldNotifyContinuableResult(submitResponse.status)) {
+    await recordErrorEvent(
+      settings,
+      notificationForContinuableResult({
+        runId,
+        vacancyId: candidate.vacancyId,
+        status: submitResponse.status,
+        vacancyUrl: candidate.vacancyUrl,
+        notes: submitResponse.notes
+      })
+    );
+  }
+}
+
+async function pollCoverLetterApproval(
+  settings: BootstrapSettings,
+  vacancyId: string,
+  signal: AbortSignal
+): Promise<CoverLetter> {
+  for (;;) {
+    ensureNotAborted(signal);
+    await abortableDelay(COVER_LETTER_POLL_MS, signal);
+    const letter = await getCoverLetter(settings, vacancyId);
+    if (letter.status !== "pending_approval") {
+      return letter;
+    }
   }
 }
 
@@ -509,6 +680,26 @@ async function requestVacancyApply(
       type: VACANCY_APPLY_SIMPLE_REQUEST,
       runId,
       vacancyId
+    },
+    "content/vacancy.js",
+    signal
+  );
+}
+
+async function requestCoverLetterSubmit(
+  tabId: number,
+  runId: string,
+  vacancyId: string,
+  body: string,
+  signal: AbortSignal
+): Promise<VacancyApplySimpleResponse> {
+  return sendMessageWithInjection<VacancyApplySimpleResponse>(
+    tabId,
+    {
+      type: VACANCY_SUBMIT_COVER_LETTER_REQUEST,
+      runId,
+      vacancyId,
+      body
     },
     "content/vacancy.js",
     signal
@@ -637,13 +828,12 @@ async function pendingConfirmationForStatus(): Promise<PendingConfirmationView |
     return pendingView(stored);
   }
 
-  await finalizeRecoveredSkip(
-    stored,
-    "owner confirmation timed out while service worker was dormant"
-  );
+  await applyRecoveredConfirmation(stored, "confirm", {
+    timedOut: true
+  });
   state = {
     phase: "idle",
-    message: `Owner confirmation timed out for ${stored.vacancyId}`
+    message: `Recovered auto-confirm for ${stored.vacancyId}; run stopped`
   };
   return null;
 }
@@ -657,14 +847,18 @@ async function handleRecoveredConfirmationDecision(
     return { ok: false, reason: "no_pending_confirmation" };
   }
 
-  if (Date.now() >= stored.expiresAtMs) {
-    await finalizeRecoveredSkip(
-      stored,
-      "owner confirmation timed out while service worker was dormant"
-    );
-    return { ok: false, reason: "confirmation_expired" };
-  }
+  const effectiveDecision: ConfirmDecision =
+    Date.now() >= stored.expiresAtMs ? "confirm" : decision;
+  return applyRecoveredConfirmation(stored, effectiveDecision, {
+    timedOut: Date.now() >= stored.expiresAtMs
+  });
+}
 
+async function applyRecoveredConfirmation(
+  stored: StoredOwnerConfirmation,
+  decision: ConfirmDecision,
+  options: { timedOut?: boolean } = {}
+): Promise<Record<string, unknown>> {
   await clearStoredOwnerConfirmation();
   const settings = await loadBootstrapSettings();
 
@@ -676,7 +870,9 @@ async function handleRecoveredConfirmationDecision(
       vacancyTitle: stored.title,
       employerName: stored.employer,
       vacancyUrl: stored.url,
-      notes: "owner declined in popup after service worker restart"
+      notes: options.timedOut
+        ? "owner confirmation expired before skip decision; auto-confirm is required"
+        : "owner declined in popup after service worker restart"
     });
     await stopRun(settings, stored.runId, "owner_stop");
     state = {
@@ -721,30 +917,26 @@ async function handleRecoveredConfirmationDecision(
     vacancyUrl: stored.url,
     ...(response.notes === undefined ? {} : { notes: response.notes })
   });
+  if (shouldNotifyContinuableResult(response.status)) {
+    await recordErrorEvent(
+      settings,
+      notificationForContinuableResult({
+        runId: stored.runId,
+        vacancyId: stored.vacancyId,
+        status: response.status,
+        vacancyUrl: stored.url,
+        notes: response.notes
+      })
+    );
+  }
   await stopRun(settings, stored.runId, "owner_stop");
   state = {
     phase: "idle",
-    message: `Recovered confirmation for ${stored.vacancyId}; run stopped`
+    message: options.timedOut
+      ? `Recovered auto-confirm for ${stored.vacancyId}; run stopped`
+      : `Recovered confirmation for ${stored.vacancyId}; run stopped`
   };
   return { ok: true, recovered: true };
-}
-
-async function finalizeRecoveredSkip(
-  stored: StoredOwnerConfirmation,
-  notes: string
-): Promise<void> {
-  await clearStoredOwnerConfirmation();
-  const settings = await loadBootstrapSettings();
-  await recordVacancyResult(settings, {
-    runId: stored.runId,
-    vacancyId: stored.vacancyId,
-    status: "skipped",
-    vacancyTitle: stored.title,
-    employerName: stored.employer,
-    vacancyUrl: stored.url,
-    notes
-  });
-  await stopRun(settings, stored.runId, "owner_stop");
 }
 
 function pendingView(

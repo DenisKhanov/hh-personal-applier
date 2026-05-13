@@ -9,7 +9,7 @@ import (
 )
 
 func TestFormatNotificationBuildsSafetyEventMessage(t *testing.T) {
-	payload := json.RawMessage(`{"runId":"run-1","vacancyId":"42","message":"captcha visible"}`)
+	payload := json.RawMessage(`{"runId":"run-1","vacancyId":"42","vacancyUrl":"https://hh.ru/vacancy/42","message":"captcha visible"}`)
 
 	message, err := FormatNotification(storage.Notification{
 		Kind:    storage.NotificationKindCaptcha,
@@ -19,7 +19,7 @@ func TestFormatNotificationBuildsSafetyEventMessage(t *testing.T) {
 		t.Fatalf("expected captcha notification to format, got %v", err)
 	}
 
-	for _, want := range []string{"CAPTCHA", "run-1", "42", "captcha visible"} {
+	for _, want := range []string{"CAPTCHA", "run-1", "42", "https://hh.ru/vacancy/42", "captcha visible"} {
 		if !strings.Contains(message.Text, want) {
 			t.Fatalf("expected message %q to contain %q", message.Text, want)
 		}
@@ -62,12 +62,33 @@ func TestFormatNotificationBuildsTelegramTestGreeting(t *testing.T) {
 	}
 }
 
-func TestFormatNotificationRejectsCoverLetterApprovalUntilStage7(t *testing.T) {
-	_, err := FormatNotification(storage.Notification{
-		Kind:    storage.NotificationKindCoverLetterApproval,
-		Payload: json.RawMessage(`{}`),
+func TestFormatNotificationBuildsCoverLetterApprovalMessageWithButtons(t *testing.T) {
+	message, err := FormatNotification(storage.Notification{
+		Kind: storage.NotificationKindCoverLetterApproval,
+		Payload: json.RawMessage(`{
+			"vacancyId":"42",
+			"vacancyTitle":"Go Backend Developer",
+			"vacancyUrl":"https://hh.ru/vacancy/42",
+			"body":"Здравствуйте! Могу быть полезен в backend задачах.",
+			"language":"ru",
+			"expiresAt":"2026-05-12T13:00:00Z"
+		}`),
 	})
-	if err == nil {
-		t.Fatal("expected cover letter approval formatting to wait for stage 7")
+	if err != nil {
+		t.Fatalf("expected cover letter approval to format, got %v", err)
+	}
+
+	for _, want := range []string{"Go Backend Developer", "https://hh.ru/vacancy/42", "Здравствуйте"} {
+		if !strings.Contains(message.Text, want) {
+			t.Fatalf("expected message %q to contain %q", message.Text, want)
+		}
+	}
+	if len(message.Buttons) != 1 || len(message.Buttons[0]) != 3 {
+		t.Fatalf("expected one row with three buttons, got %+v", message.Buttons)
+	}
+	if message.Buttons[0][0].Data != "approve|42" ||
+		message.Buttons[0][1].Data != "edit|42" ||
+		message.Buttons[0][2].Data != "skip|42" {
+		t.Fatalf("unexpected buttons: %+v", message.Buttons)
 	}
 }

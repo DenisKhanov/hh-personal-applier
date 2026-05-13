@@ -199,9 +199,9 @@ CREATE TABLE processed_vacancies (
 );
 ```
 
-`skipped` — ручной skip из popup (`autoApply=false`) или таймаут ожидания
-подтверждения; специализированные `skipped_*` статусы остаются для
-machine-readable причин автоматического пропуска.
+`skipped` — ручной skip из popup (`autoApply=false`); специализированные
+`skipped_*` статусы остаются для machine-readable причин автоматического
+пропуска. Таймаут popup-подтверждения считается подтверждением, а не skip.
 
 Без `user_id`, без `search_direction_id`, без `negotiation_id` (его в UI-режиме нет).
 
@@ -395,7 +395,7 @@ paused_captcha ──timeout 30 min──> idle (с уведомлением)
    - `POST /attempts/start { run_id, vacancy_id }` — backend ставит `processed_vacancies.status='attempting'`. **Это делается до любого клика**, включая letter-flow, чтобы падение после первого клика не привело к повторному авто-клику.
    - Если `requiresLetter && requireCoverLetterApproval` → backend генерит письмо, шлёт в Telegram approve, запоминает `cover_letters.id`. Расширение **не кликает** «Откликнуться» пока статус не `approved`. На `expired` (TTL вышел) или Telegram «Пропустить» → `POST /vacancies/result { status: "skipped_cover_letter" }`.
    - Если `requiresLetter && !requireCoverLetterApproval` → backend генерит письмо, сразу возвращает текст без Telegram approval, extension вставляет в textarea и кликает «Отправить» (см. §9).
-   - Если `autoApply=false` → background ставит popup в режим «ожидание подтверждения» с заголовком и работодателем. Цикл ждёт клика «Подтвердить» или «Пропустить» в popup (см. §6.4). Таймаут ожидания — 5 минут, после — вакансия `skipped`, цикл продолжается.
+   - Если `autoApply=false` → background ставит popup в режим «ожидание подтверждения» с заголовком и работодателем. Цикл ждёт клика «Подтвердить» или «Пропустить» в popup (см. §6.4). Таймаут ожидания — 30 секунд, после — считается «Подтвердить», цикл продолжает отклик.
    - Если `!requiresLetter` (или `approved`/auto-letter) → click «Откликнуться» → проверь, что появился success state (например, кнопка сменилась на «Отклик отправлен»).
    - На success: `POST /vacancies/result { run_id, vacancy_id, status: "applied", ... }`.
    - На failure (модал «откройте чат», «требуется подтверждение телефона», «прохождение теста»): `POST /vacancies/result { status: "manual_action" }`, переход к следующей.
@@ -418,9 +418,9 @@ paused_captcha ──timeout 30 min──> idle (с уведомлением)
 
 1. Background worker перед каждым кликом «Откликнуться» отправляет popup сообщение `{ type: "CONFIRM_REQUEST", vacancyId, title, employer, url }`.
 2. Popup переходит в состояние **«Ожидание подтверждения»**: показывает название, работодателя, ссылку и кнопки **«Подтвердить»** / **«Пропустить»**.
-3. Background ждёт ответа (таймаут 5 минут).
-4. «Подтвердить» → background продолжает клик. «Пропустить» или таймаут → `POST /vacancies/result { status: "skipped" }`, переход к следующей.
-5. Если popup закрыт и не отвечает дольше таймаута — считается «Пропустить».
+3. Background ждёт ответа (таймаут 30 секунд).
+4. «Подтвердить» или таймаут → background продолжает клик. «Пропустить» → `POST /vacancies/result { status: "skipped" }`, переход к следующей.
+5. Если popup закрыт и не отвечает дольше таймаута — считается «Подтвердить».
 
 `autoApply=false` не отменяет cover letter approval — если письмо тоже требует approval, оба шага выполняются последовательно (сначала Telegram, потом popup-клик).
 
@@ -474,11 +474,11 @@ Backend при `POST /runs/continue` проверяет, что run сущест
 | Кнопка «Откликнуться на сайте компании» (response_url) | Skip | `skipped_external` |
 | После клика: «Вы уже откликались» | Skip | `skipped_already_applied` |
 | После клика: выбор резюме (не должно происходить — одно резюме, автовыбор) | Если модал всё же появился — `manual_action`, алерт | `manual_action` |
-| После клика: подтверждение телефона, обязательные вопросы или другой интерактивный модал | Stop/ручное действие | `manual_action` |
+| После клика: подтверждение телефона или другой опасный интерактивный модал | Stop/ручное действие | `manual_action` |
 | После клика: модал «требуется сопроводительное письмо», `requireCoverLetterApproval=true` | LLM генерация → Telegram approval → wait | (cover_letter pending) |
 | После клика: модал «требуется сопроводительное письмо», `requireCoverLetterApproval=false` | LLM генерация → auto-вставка без approve | `applied` (или `error`) |
 | Cover letter TTL истёк или Telegram «Пропустить» | Skip вакансию | `skipped_cover_letter` |
-| После клика: появилась форма с дополнительными вопросами | Skip + manual_action алерт | `manual_action` |
+| После клика: появилась страница/форма с дополнительными вопросами | `manual_action` + Telegram alert, переход к следующей | `manual_action` |
 | После клика: success state | Записать | `applied` |
 | Сетевая ошибка / timeout страницы | Skip эту вакансию, **не stop**, попробовать следующую | `error` |
 | Дублирующиеся / неожиданные модалы 2+ подряд | Stop весь цикл | (нет записи) |
@@ -624,12 +624,12 @@ Backend при `POST /runs/continue` проверяет, что run сущест
 - [ ] Manual smoke: реальная отправка `telegram_test`, `captcha`/`login_lost` в Telegram и daily report через временно сдвинутый cron.
 
 ### Этап 7. LLM cover letters
-- [ ] `internal/llm` — Groq adapter за интерфейсом.
-- [ ] Prompt + language detection + `cover_letter_guard` (regex + длина) — портируется из §11-§13 frozen-проекта.
-- [ ] `POST /cover_letters/request { vacancy_id, vacancy_title, vacancy_description }` → backend генерит, кладёт в `cover_letters` + Telegram approval.
-- [ ] Telegram callback handler: «Отправить» / «Изменить» / «Пропустить».
-- [ ] `GET /cover_letters/{vacancy_id}` для long-polling из extension.
-- [ ] Content script: при модале «требуется письмо» → request → wait → fill textarea → click submit.
+- [x] `internal/llm` — Groq adapter за интерфейсом.
+- [x] Prompt + language detection + `cover_letter_guard` (regex + длина) — портируется из §11-§13 frozen-проекта.
+- [x] `POST /cover_letters/request { vacancy_id, vacancy_title, vacancy_description }` → backend генерит, кладёт в `cover_letters` + Telegram approval.
+- [x] Telegram callback handler: «Отправить» / «Изменить» / «Пропустить».
+- [x] `GET /cover_letters/{vacancy_id}` для long-polling из extension.
+- [x] Content script: при модале «требуется письмо» → request → wait → fill textarea → click submit.
 
 ### Этап 8. Popup polish + run/daily limits + dashboard
 - [ ] Popup показывает: статус (idle/running/paused), сегодня (applied/skipped/errors/remaining), кнопки Start/Stop/Continue.
@@ -664,7 +664,7 @@ Backend при `POST /runs/continue` проверяет, что run сущест
 - [x] handlers `POST /candidates` — фильтрация по processed + daily/run лимит.
 - [x] handlers `POST /attempts/start` — `attempting` не даёт повторно кликнуть вакансию.
 - [x] handlers `POST /vacancies/result` — запись в `processed_vacancies` + counter инкремент.
-- [ ] `cover_letter_guard` (regex + длина).
+- [x] `cover_letter_guard` (regex + длина).
 - [ ] Telegram outbox dispatcher (с fake telegram client).
 
 ### Integration (Go backend)
@@ -743,5 +743,5 @@ Backend при `POST /runs/continue` проверяет, что run сущест
 - [ ] Навигация между страницами из background — только `chrome.tabs.update(tabId, {url})`. Не `window.location`, не `chrome.tabs.create`.
 - [x] `POST /vacancies/result` — идемпотентный. Повторный вызов с тем же `(run_id, vacancy_id)` и terminal-статусом не инкрементирует счётчики второй раз.
 - [x] `settings_snapshot` в `apply_runs` — лимиты и pacing читаются из snapshot, не из живых `owner_settings`, пока run активен.
-- [ ] `autoApply=false` — добавлять popup-подтверждение (`CONFIRM_REQUEST` → ответ popup) перед каждым кликом «Откликнуться». Без ответа в течение 5 минут = «Пропустить».
+- [ ] `autoApply=false` — добавлять popup-подтверждение (`CONFIRM_REQUEST` → ответ popup) перед каждым кликом «Откликнуться». Без ответа в течение 30 секунд = «Подтвердить».
 - [ ] Chrome notifications дублируют Telegram для событий `captcha`, `error`, `login_lost` (§10). Для `cover_letter_approval` и `daily_report` — только Telegram.

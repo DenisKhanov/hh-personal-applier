@@ -6,9 +6,12 @@ import { parseHTML } from "linkedom";
 
 import {
   analyzeVacancyPage,
+  fillCoverLetterAndSubmit,
   findApplyButton,
+  findCoverLetterTextarea,
   findResponseSubmitButton,
   hasApplyButton,
+  vacancyDescription,
   waitForStableAnalysis,
   type VacancyPageAnalysis
 } from "../src/shared/vacancyPage.ts";
@@ -57,7 +60,59 @@ test("detects success state after click", async () => {
 test("detects cover-letter modal as a known skip state", async () => {
   const document = await loadFixture("vacancy-cover-letter.html");
 
-  assert.equal(analyzeVacancyPage(document).state, "requires_letter");
+  const analysis = analyzeVacancyPage(document);
+  assert.equal(analysis.state, "requires_letter");
+  assert.match(analysis.description ?? "", /REST API/);
+  assert.match(vacancyDescription(document), /PostgreSQL/);
+});
+
+test("fills required cover letter textarea and clicks submit", async () => {
+  const document = await loadFixture("vacancy-cover-letter.html");
+  const textarea = findCoverLetterTextarea(document);
+  assert.notEqual(textarea, null);
+
+  let clicked = false;
+  findResponseSubmitButton(document)?.addEventListener("click", () => {
+    clicked = true;
+  });
+
+  assert.equal(fillCoverLetterAndSubmit(document, "Generated cover letter"), true);
+  assert.equal(textarea?.value, "Generated cover letter");
+  assert.equal(clicked, true);
+});
+
+test("fills cover letter through native textarea setter before input events", async () => {
+  const document = await loadFixture("vacancy-cover-letter.html");
+  const textarea = findCoverLetterTextarea(document);
+  assert.notEqual(textarea, null);
+  if (textarea === null) {
+    return;
+  }
+
+  const prototype = Object.getPrototypeOf(textarea) as HTMLTextAreaElement;
+  const descriptor = Object.getOwnPropertyDescriptor(prototype, "value");
+  assert.equal(typeof descriptor?.set, "function");
+  assert.equal(typeof descriptor?.get, "function");
+
+  let trackedValue = "";
+  let inputObservedNativeChange = false;
+  Object.defineProperty(textarea, "value", {
+    configurable: true,
+    get() {
+      return descriptor?.get?.call(this) as string;
+    },
+    set(value: string) {
+      trackedValue = value;
+      descriptor?.set?.call(this, value);
+    }
+  });
+  textarea.addEventListener("input", () => {
+    inputObservedNativeChange = trackedValue !== textarea.value;
+  });
+
+  assert.equal(fillCoverLetterAndSubmit(document, "Generated cover letter"), true);
+  assert.equal(textarea.value, "Generated cover letter");
+  assert.equal(inputObservedNativeChange, true);
 });
 
 test("detects response popup with optional cover letter as ready to submit", async () => {
@@ -74,6 +129,23 @@ test("detects response popup with disabled submit as manual action", async () =>
   assert.equal(analysis.state, "manual_action");
   assert.equal(analysis.notes, "response popup requires manual action");
   assert.equal(findResponseSubmitButton(document), null);
+});
+
+test("detects vacancy response page with employer questions as manual action", async () => {
+  const document = await loadFixture("vacancy-response-questions.html");
+  const analysis = analyzeVacancyPage(document);
+
+  assert.equal(analysis.state, "manual_action");
+  assert.equal(analysis.notes, "vacancy response page requires manual answers");
+});
+
+test("keeps employer questions on a regular vacancy page as skipped_test", async () => {
+  const document = await loadFixture("vacancy-simple.html");
+  const marker = document.createElement("p");
+  marker.textContent = "Ответьте на вопросы работодателя";
+  document.body.append(marker);
+
+  assert.equal(analyzeVacancyPage(document).state, "skipped_test");
 });
 
 test("detects unknown modal as a safety stop state", async () => {

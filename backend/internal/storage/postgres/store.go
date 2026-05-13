@@ -31,6 +31,14 @@ func (s *Store) GetSettings(ctx context.Context) (storage.Settings, error) {
 	return getSettings(ctx, s.db)
 }
 
+func (s *Store) GetRunSettings(ctx context.Context, runID string) (storage.Settings, error) {
+	run, err := s.getRun(ctx, runID)
+	if err != nil {
+		return storage.Settings{}, err
+	}
+	return run.SettingsSnapshot, nil
+}
+
 func (s *Store) UpdateSettings(ctx context.Context, settings storage.Settings) (storage.Settings, error) {
 	if err := storage.ValidateSettings(settings); err != nil {
 		return storage.Settings{}, err
@@ -455,7 +463,7 @@ func (s *Store) RecordEvent(ctx context.Context, event storage.Event) error {
 	}
 	defer rollback(tx)
 
-	if event.RunID != "" {
+	if event.RunID != "" && !event.NonBlocking {
 		status := storage.RunStatusPausedUnknown
 		if event.Kind == storage.EventKindCaptcha {
 			status = storage.RunStatusPausedCaptcha
@@ -475,6 +483,9 @@ func (s *Store) RecordEvent(ctx context.Context, event storage.Event) error {
 	var dedupKey sql.NullString
 	if event.RunID != "" {
 		dedupKey = sql.NullString{String: fmt.Sprintf("%s:%s", event.Kind, event.RunID), Valid: true}
+		if event.NonBlocking && event.VacancyID != "" {
+			dedupKey = sql.NullString{String: fmt.Sprintf("%s:%s:%s", event.Kind, event.RunID, event.VacancyID), Valid: true}
+		}
 	}
 
 	if _, err := tx.ExecContext(ctx, `
@@ -603,6 +614,125 @@ func (s *Store) QueueTelegramTest(ctx context.Context) (storage.NotificationQueu
 	return storage.NotificationQueueResult{Queued: true}, nil
 }
 
+func (s *Store) CreateCoverLetter(ctx context.Context, create storage.CoverLetterCreate) (storage.CoverLetter, bool, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return storage.CoverLetter{}, false, err
+	}
+	defer rollback(tx)
+
+	letter, err := scanCoverLetter(tx.QueryRowContext(ctx, `
+		INSERT INTO cover_letters (
+		    vacancy_id, vacancy_title, body, language, status, expires_at
+		)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		ON CONFLICT (vacancy_id) DO NOTHING
+		RETURNING id::text, vacancy_id, vacancy_title, body, language, status, expires_at, created_at`,
+		create.VacancyID,
+		nullIfEmpty(create.VacancyTitle),
+		create.Body,
+		string(create.Language),
+		string(create.Status),
+		create.ExpiresAt,
+	))
+	created := true
+	if errors.Is(err, sql.ErrNoRows) {
+		created = false
+		letter, err = getCoverLetter(ctx, tx, create.VacancyID)
+	}
+	if err != nil {
+		return storage.CoverLetter{}, false, err
+	}
+
+	if created && create.Status == storage.CoverLetterStatusPendingApproval {
+		payload := storage.CoverLetterApprovalNotification{
+			VacancyID:    letter.VacancyID,
+			VacancyTitle: letter.VacancyTitle,
+			VacancyURL:   create.VacancyURL,
+			Body:         letter.Body,
+			Language:     letter.Language,
+			ExpiresAt:    letter.ExpiresAt,
+		}
+		if err := enqueueNotification(ctx, tx, storage.NotificationKindCoverLetterApproval, payload, "cover_letter_approval:"+letter.VacancyID); err != nil {
+			return storage.CoverLetter{}, false, err
+		}
+		letter.ApprovalQueued = true
+	}
+
+	if err := tx.Commit(); err != nil {
+		return storage.CoverLetter{}, false, err
+	}
+	return letter, created, nil
+}
+
+func (s *Store) GetCoverLetter(ctx context.Context, vacancyID string, now time.Time) (storage.CoverLetter, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return storage.CoverLetter{}, err
+	}
+	defer rollback(tx)
+
+	if err := expireCoverLetter(ctx, tx, vacancyID, now); err != nil {
+		return storage.CoverLetter{}, err
+	}
+	letter, err := getCoverLetter(ctx, tx, vacancyID)
+	if err != nil {
+		return storage.CoverLetter{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return storage.CoverLetter{}, err
+	}
+	return letter, nil
+}
+
+func (s *Store) ResolveCoverLetter(ctx context.Context, vacancyID string, status storage.CoverLetterStatus, now time.Time) (storage.CoverLetter, bool, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return storage.CoverLetter{}, false, err
+	}
+	defer rollback(tx)
+
+	if err := expireCoverLetter(ctx, tx, vacancyID, now); err != nil {
+		return storage.CoverLetter{}, false, err
+	}
+
+	letter, err := scanCoverLetter(tx.QueryRowContext(ctx, `
+		UPDATE cover_letters
+		SET status = $2
+		WHERE vacancy_id = $1
+		  AND status = 'pending_approval'
+		  AND expires_at > $3
+		RETURNING id::text, vacancy_id, vacancy_title, body, language, status, expires_at, created_at`,
+		vacancyID,
+		string(status),
+		now,
+	))
+	changed := true
+	if errors.Is(err, sql.ErrNoRows) {
+		changed = false
+		letter, err = getCoverLetter(ctx, tx, vacancyID)
+	}
+	if err != nil {
+		return storage.CoverLetter{}, false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return storage.CoverLetter{}, false, err
+	}
+	return letter, changed, nil
+}
+
+func (s *Store) QueueLLMRateLimitAlert(ctx context.Context, runID string) error {
+	payload := map[string]any{
+		"runId":   runID,
+		"message": "Groq rate limit reached; letter-required vacancies will be skipped until the next Start.",
+	}
+	dedupKey := "llm_rate_limit"
+	if runID != "" {
+		dedupKey = "llm_rate_limit:" + runID
+	}
+	return enqueueNotification(ctx, s.db, storage.NotificationKindError, payload, dedupKey)
+}
+
 type settingsScanner interface {
 	Scan(dest ...any) error
 }
@@ -687,6 +817,61 @@ func scanRun(row settingsScanner) (storage.Run, error) {
 		run.StopReason = stopReason.String
 	}
 	return run, nil
+}
+
+func getCoverLetter(ctx context.Context, q queryRower, vacancyID string) (storage.CoverLetter, error) {
+	letter, err := scanCoverLetter(q.QueryRowContext(ctx, `
+		SELECT id::text, vacancy_id, vacancy_title, body, language, status, expires_at, created_at
+		FROM cover_letters
+		WHERE vacancy_id = $1`,
+		vacancyID,
+	))
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return storage.CoverLetter{}, storage.NewNotFound("cover_letter_not_found", "cover letter not found")
+		}
+		return storage.CoverLetter{}, err
+	}
+	return letter, nil
+}
+
+func scanCoverLetter(row settingsScanner) (storage.CoverLetter, error) {
+	var letter storage.CoverLetter
+	var title sql.NullString
+	var language string
+	var status string
+	err := row.Scan(
+		&letter.ID,
+		&letter.VacancyID,
+		&title,
+		&letter.Body,
+		&language,
+		&status,
+		&letter.ExpiresAt,
+		&letter.CreatedAt,
+	)
+	if err != nil {
+		return storage.CoverLetter{}, err
+	}
+	if title.Valid {
+		letter.VacancyTitle = title.String
+	}
+	letter.Language = storage.CoverLetterLanguage(language)
+	letter.Status = storage.CoverLetterStatus(status)
+	return letter, nil
+}
+
+func expireCoverLetter(ctx context.Context, tx *sql.Tx, vacancyID string, now time.Time) error {
+	_, err := tx.ExecContext(ctx, `
+		UPDATE cover_letters
+		SET status = 'expired'
+		WHERE vacancy_id = $1
+		  AND status = 'pending_approval'
+		  AND expires_at <= $2`,
+		vacancyID,
+		now,
+	)
+	return err
 }
 
 func (s *Store) dailyAppliedCount(ctx context.Context, today time.Time) (int, error) {
