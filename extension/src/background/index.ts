@@ -57,6 +57,11 @@ import {
   type TabNavigationDeps,
   type TabReadinessSnapshot
 } from "../shared/tabNavigation";
+import {
+  isBackendNetworkError,
+  networkSafetyEvent
+} from "../shared/networkSafety";
+import { nextSearchPageUrl } from "../shared/searchPagination";
 
 type WorkerPhase = "idle" | "running" | "stopping";
 
@@ -238,6 +243,12 @@ async function startFromPopup(): Promise<Record<string, unknown>> {
         };
         return;
       }
+      if (isBackendNetworkError(error)) {
+        void handleBackendNetworkFailure(settings, error).catch((networkError: unknown) => {
+          logBackgroundError("failed to handle backend network safety stop", networkError);
+        });
+        return;
+      }
       logBackgroundError("run failed", error);
       state = {
         phase: "idle",
@@ -247,6 +258,33 @@ async function startFromPopup(): Promise<Record<string, unknown>> {
   );
 
   return { ...publicStatusSync(), ok: true };
+}
+
+async function handleBackendNetworkFailure(
+  settings: BootstrapSettings,
+  error: unknown
+): Promise<void> {
+  const runId = state.runId;
+  state = {
+    phase: "idle",
+    message: "Paused: backend network request failed after retries",
+    ...(runId === undefined ? {} : { runId })
+  };
+
+  await createLocalNotification(
+    "HH Personal Applier paused",
+    "Backend is unreachable after retries. Check the local backend, then continue from popup."
+  );
+
+  if (runId === undefined) {
+    return;
+  }
+
+  try {
+    await recordErrorEvent(settings, networkSafetyEvent(runId, error));
+  } catch (recordError: unknown) {
+    logBackgroundError("failed to record backend network safety stop", recordError);
+  }
 }
 
 async function stopFromPopup(): Promise<Record<string, unknown>> {
@@ -329,22 +367,61 @@ async function runApplyCycle(
     message: "Parsing search results"
   };
 
-  const parsed = await requestSearchCandidates(tabId, searchUrl, signal);
+  let pageUrl = searchUrl;
+  let reason: ReturnType<typeof completionReason> = "no_more_vacancies";
+
+  while (true) {
+    const pageResult = await processSearchPage(settings, run, tabId, pageUrl, signal);
+    reason = pageResult.reason;
+    if (reason !== "no_more_vacancies" || pageResult.emptyPage) {
+      break;
+    }
+
+    pageUrl = nextSearchPageUrl(pageUrl);
+    latestSearchSnapshot = null;
+    state = {
+      ...state,
+      message: `Opening next search page ${new URL(pageUrl).searchParams.get("page") ?? ""}`
+    };
+    await navigateTab(tabId, pageUrl, signal);
+  }
+
+  await stopRun(settings, run.runId, reason);
+  state = {
+    phase: "idle",
+    message: `Completed: ${reason}`
+  };
+}
+
+async function processSearchPage(
+  settings: BootstrapSettings,
+  run: ApplyRun,
+  tabId: number,
+  pageUrl: string,
+  signal: AbortSignal
+): Promise<{ reason: ReturnType<typeof completionReason>; emptyPage: boolean }> {
+  state = {
+    ...state,
+    message: "Parsing search results"
+  };
+
+  const parsed = await requestSearchCandidates(tabId, pageUrl, signal);
   ensureNotAborted(signal);
 
   if (parsed.candidates.length === 0) {
     console.log("[HH Personal Applier] search parser returned 0 candidates — selectors may not match the current hh.ru DOM");
+    return { reason: "no_more_vacancies", emptyPage: true };
   }
 
   const result = await filterCandidates(settings, run.runId, parsed.candidates);
   logCandidateDecisions(run, parsed.candidates, result);
 
-  if (result.allow.length === 0 && parsed.candidates.length > 0) {
+  if (result.allow.length === 0) {
     const reasons = new Map<string, number>();
     for (const rejection of result.rejected) {
       reasons.set(rejection.reason, (reasons.get(rejection.reason) ?? 0) + 1);
     }
-    console.log("[HH Personal Applier] all candidates rejected by backend — cannot apply to any vacancy", {
+    console.log("[HH Personal Applier] all candidates rejected by backend — moving to next search page if limits allow", {
       total: parsed.candidates.length,
       reasons: Object.fromEntries(reasons),
       remainingDaily: result.remainingDaily,
@@ -377,11 +454,9 @@ async function runApplyCycle(
   }
 
   ensureNotAborted(signal);
-  const reason = completionReason(result);
-  await stopRun(settings, run.runId, reason);
-  state = {
-    phase: "idle",
-    message: `Completed: ${reason}`
+  return {
+    reason: completionReason(result, commandCount),
+    emptyPage: false
   };
 }
 

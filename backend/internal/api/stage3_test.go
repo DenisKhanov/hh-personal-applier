@@ -23,7 +23,7 @@ func TestSettingsHandlersReadAndValidateUpdates(t *testing.T) {
 	}
 	var settings storage.Settings
 	decodeJSON(t, getResponse, &settings)
-	if settings.DailyLimit != 100 || settings.RunLimit != 25 || !settings.AutoApply {
+	if settings.DailyLimit != 100 || settings.RunLimit != 25 || settings.AutoApply {
 		t.Fatalf("unexpected settings: %+v", settings)
 	}
 
@@ -163,7 +163,7 @@ func TestCandidatesHandlerRejectsNonRunningRun(t *testing.T) {
 	assertErrorCode(t, response, "run_not_running")
 }
 
-func TestCandidatesHandlerAllowsAttemptingVacancies(t *testing.T) {
+func TestCandidatesHandlerRejectsAttemptingVacancies(t *testing.T) {
 	store := newFakeStore()
 	store.activeRun = &storage.Run{
 		ID:               "run-2",
@@ -188,18 +188,17 @@ func TestCandidatesHandlerAllowsAttemptingVacancies(t *testing.T) {
 
 	var body storage.CandidatesResult
 	decodeJSON(t, response, &body)
-	if len(body.Allow) != 2 {
-		t.Fatalf("expected vacancy 1 (attempting) and 3 (new) allowed, got allow=%v", body.Allow)
+	if len(body.Allow) != 1 || body.Allow[0] != "3" {
+		t.Fatalf("expected only vacancy 3 allowed, got allow=%v", body.Allow)
 	}
-	allowed := map[string]bool{}
-	for _, id := range body.Allow {
-		allowed[id] = true
+	if len(body.Rejected) != 2 {
+		t.Fatalf("expected two rejected vacancies, got %+v", body.Rejected)
 	}
-	if !allowed["1"] || !allowed["3"] {
-		t.Fatalf("expected vacancies 1 and 3 in allow list, got %v", body.Allow)
+	if body.Rejected[0].VacancyID != "1" || body.Rejected[0].Reason != "already_processed" || body.Rejected[0].Status != "attempting" {
+		t.Fatalf("expected vacancy 1 rejected as attempting, got %+v", body.Rejected)
 	}
-	if len(body.Rejected) != 1 || body.Rejected[0].VacancyID != "2" || body.Rejected[0].Reason != "already_processed" {
-		t.Fatalf("expected only vacancy 2 rejected as already_processed, got %+v", body.Rejected)
+	if body.Rejected[1].VacancyID != "2" || body.Rejected[1].Reason != "already_processed" || body.Rejected[1].Status != "applied" {
+		t.Fatalf("expected vacancy 2 rejected as applied, got %+v", body.Rejected)
 	}
 }
 
@@ -255,6 +254,33 @@ func TestAttemptsStartAndVacanciesResultAreIdempotent(t *testing.T) {
 	}
 	if store.activeRun.AppliedCount != 1 {
 		t.Fatalf("expected applied counter to increment once, got %d", store.activeRun.AppliedCount)
+	}
+}
+
+func TestAttemptsStartRejectsAttemptingVacancyFromAnotherRun(t *testing.T) {
+	store := newFakeStore()
+	store.activeRun = &storage.Run{
+		ID:               "run-2",
+		Status:           storage.RunStatusRunning,
+		SettingsSnapshot: store.settings,
+	}
+	store.processed["42"] = storage.ProcessedStatusAttempting
+	store.processedRun["42"] = "run-1"
+	mux := api.NewRouter(testSecret, store)
+
+	response := doJSON(t, mux, http.MethodPost, "/attempts/start", map[string]any{
+		"runId":        "run-2",
+		"vacancyId":    "42",
+		"vacancyTitle": "Go developer",
+		"employerName": "Acme",
+		"vacancyUrl":   "https://hh.ru/vacancy/42",
+	})
+	if response.Code != http.StatusConflict {
+		t.Fatalf("expected attempt start conflict, got %d: %s", response.Code, response.Body.String())
+	}
+	assertErrorCode(t, response, "vacancy_already_processed")
+	if store.processedRun["42"] != "run-1" {
+		t.Fatalf("expected existing attempting run to remain run-1, got %q", store.processedRun["42"])
 	}
 }
 
@@ -449,6 +475,31 @@ func TestNonBlockingErrorEventCarriesVacancyURLAndDoesNotPauseRun(t *testing.T) 
 	}
 }
 
+func TestNetworkErrorEventPausesRunAsPausedNetwork(t *testing.T) {
+	store := newFakeStore()
+	store.activeRun = &storage.Run{
+		ID:               "run-1",
+		Status:           storage.RunStatusRunning,
+		SettingsSnapshot: store.settings,
+	}
+	mux := api.NewRouter(testSecret, store)
+
+	response := doJSON(t, mux, http.MethodPost, "/events/error", map[string]any{
+		"runId":   "run-1",
+		"message": "Backend network request failed after retries.",
+		"details": map[string]any{
+			"code":   "backend_network_error",
+			"safety": "network",
+		},
+	})
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected network error event 200, got %d: %s", response.Code, response.Body.String())
+	}
+	if store.activeRun.Status != storage.RunStatusPausedNetwork {
+		t.Fatalf("expected run paused_network, got %s", store.activeRun.Status)
+	}
+}
+
 func TestTelegramTestHandlerQueuesGreeting(t *testing.T) {
 	store := newFakeStore()
 	mux := api.NewRouter(testSecret, store)
@@ -489,7 +540,7 @@ func newFakeStore() *fakeStore {
 			SkipWithTest:               true,
 			SkipExternal:               true,
 			RequireCoverLetterApproval: true,
-			AutoApply:                  true,
+			AutoApply:                  false,
 		},
 		processed:    make(map[string]storage.ProcessedStatus),
 		processedRun: make(map[string]string),
@@ -552,16 +603,12 @@ func (f *fakeStore) FilterCandidates(_ context.Context, runID string, items []st
 	result := storage.CandidatesResult{RemainingDaily: 100, RemainingRun: 25}
 	for _, item := range items {
 		if status, ok := f.processed[item.VacancyID]; ok {
-			if status == storage.ProcessedStatusAttempting {
-				// Vacancies stuck in "attempting" should be retried.
-			} else {
-				result.Rejected = append(result.Rejected, storage.CandidateRejection{
-					VacancyID: item.VacancyID,
-					Reason:    "already_processed",
-					Status:    string(status),
-				})
-				continue
-			}
+			result.Rejected = append(result.Rejected, storage.CandidateRejection{
+				VacancyID: item.VacancyID,
+				Reason:    "already_processed",
+				Status:    string(status),
+			})
+			continue
 		}
 		if item.HasTest && f.settings.SkipWithTest {
 			result.Rejected = append(result.Rejected, storage.CandidateRejection{
@@ -585,11 +632,6 @@ func (f *fakeStore) StartAttempt(_ context.Context, attempt storage.AttemptStart
 	if status, exists := f.processed[attempt.VacancyID]; exists {
 		if status == storage.ProcessedStatusAttempting && f.processedRun[attempt.VacancyID] == attempt.RunID {
 			return storage.AttemptStartResult{Started: false, Reason: "already_attempting"}, nil
-		}
-		if status == storage.ProcessedStatusAttempting {
-			// Allow retry for vacancies stuck in "attempting" from a different run.
-			f.processedRun[attempt.VacancyID] = attempt.RunID
-			return storage.AttemptStartResult{Started: true}, nil
 		}
 		return storage.AttemptStartResult{}, storage.NewConflict("vacancy_already_processed", "vacancy already processed")
 	}
@@ -664,6 +706,16 @@ func (f *fakeStore) GetTodayStats(_ context.Context) (storage.TodayStats, error)
 
 func (f *fakeStore) RecordEvent(_ context.Context, event storage.Event) error {
 	f.events = append(f.events, event)
+	if f.activeRun != nil && event.RunID == f.activeRun.ID && !event.NonBlocking {
+		switch {
+		case event.Kind == storage.EventKindCaptcha:
+			f.activeRun.Status = storage.RunStatusPausedCaptcha
+		case event.Kind == storage.EventKindError && event.Details["safety"] == "network":
+			f.activeRun.Status = storage.RunStatusPausedNetwork
+		default:
+			f.activeRun.Status = storage.RunStatusPausedUnknown
+		}
+	}
 	return nil
 }
 

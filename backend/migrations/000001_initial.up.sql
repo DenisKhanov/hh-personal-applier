@@ -63,7 +63,7 @@ CREATE TABLE owner_settings (
     skip_with_test BOOLEAN NOT NULL DEFAULT TRUE,
     skip_external BOOLEAN NOT NULL DEFAULT TRUE,
     require_cover_letter_approval BOOLEAN NOT NULL DEFAULT TRUE,
-    auto_apply BOOLEAN NOT NULL DEFAULT TRUE,
+    auto_apply BOOLEAN NOT NULL DEFAULT FALSE,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     CHECK (pace_min_seconds <= pace_max_seconds)
 );

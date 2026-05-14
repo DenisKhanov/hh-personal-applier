@@ -83,12 +83,11 @@ func TestFormatNotificationBuildsCoverLetterApprovalMessageWithButtons(t *testin
 			t.Fatalf("expected message %q to contain %q", message.Text, want)
 		}
 	}
-	if len(message.Buttons) != 1 || len(message.Buttons[0]) != 3 {
-		t.Fatalf("expected one row with three buttons, got %+v", message.Buttons)
+	if len(message.Buttons) != 1 || len(message.Buttons[0]) != 2 {
+		t.Fatalf("expected one row with two buttons, got %+v", message.Buttons)
 	}
 	if message.Buttons[0][0].Data != "approve|42" ||
-		message.Buttons[0][1].Data != "edit|42" ||
-		message.Buttons[0][2].Data != "skip|42" {
+		message.Buttons[0][1].Data != "skip|42" {
 		t.Fatalf("unexpected buttons: %+v", message.Buttons)
 	}
 }

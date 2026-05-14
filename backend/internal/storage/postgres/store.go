@@ -228,17 +228,12 @@ func (s *Store) FilterCandidates(ctx context.Context, runID string, items []stor
 
 	for _, item := range items {
 		if status, ok := processed[item.VacancyID]; ok {
-			if status == storage.ProcessedStatusAttempting {
-				// Vacancies stuck in "attempting" from a previous interrupted run
-				// should be retried, not skipped.
-			} else {
-				result.Rejected = append(result.Rejected, storage.CandidateRejection{
-					VacancyID: item.VacancyID,
-					Reason:    "already_processed",
-					Status:    string(status),
-				})
-				continue
-			}
+			result.Rejected = append(result.Rejected, storage.CandidateRejection{
+				VacancyID: item.VacancyID,
+				Reason:    "already_processed",
+				Status:    string(status),
+			})
+			continue
 		}
 		if item.IsArchived {
 			result.Rejected = append(result.Rejected, storage.CandidateRejection{VacancyID: item.VacancyID, Reason: "archived"})
@@ -282,15 +277,7 @@ func (s *Store) StartAttempt(ctx context.Context, attempt storage.AttemptStart) 
 		)
 		VALUES ($1, $2, 'attempting', $3, $4, $5, $6, now(), now())
 		ON CONFLICT (vacancy_id)
-		DO UPDATE SET run_id = EXCLUDED.run_id,
-		              status = EXCLUDED.status,
-		              vacancy_title = COALESCE(NULLIF(EXCLUDED.vacancy_title, ''), processed_vacancies.vacancy_title),
-		              employer_name = COALESCE(NULLIF(EXCLUDED.employer_name, ''), processed_vacancies.employer_name),
-		              vacancy_url = COALESCE(NULLIF(EXCLUDED.vacancy_url, ''), processed_vacancies.vacancy_url),
-		              notes = COALESCE(NULLIF(EXCLUDED.notes, ''), processed_vacancies.notes),
-		              attempt_started_at = now(),
-		              updated_at = now()
-		WHERE processed_vacancies.status = 'attempting'`,
+		DO NOTHING`,
 		attempt.VacancyID,
 		attempt.RunID,
 		nullIfEmpty(attempt.VacancyTitle),
@@ -528,10 +515,7 @@ func (s *Store) RecordEvent(ctx context.Context, event storage.Event) error {
 	defer rollback(tx)
 
 	if event.RunID != "" && !event.NonBlocking {
-		status := storage.RunStatusPausedUnknown
-		if event.Kind == storage.EventKindCaptcha {
-			status = storage.RunStatusPausedCaptcha
-		}
+		status := storage.PauseStatusForEvent(event)
 		if _, err := tx.ExecContext(ctx, `
 			UPDATE apply_runs
 			SET status = $2

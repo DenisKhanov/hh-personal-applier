@@ -27,14 +27,32 @@ test("completion reason is run limit only when run remaining is exhausted", () =
   );
 });
 
-test("allowed candidates equal to current run capacity does not by itself mean run limit", () => {
+test("allowed candidates equal to current run capacity reaches run limit after processing", () => {
   assert.equal(
-    completionReason({
-      allow: ["1", "2"],
-      rejected: [],
-      remainingDaily: 30,
-      remainingRun: 2
-    }),
-    "no_more_vacancies"
+    completionReason(
+      {
+        allow: ["1", "2"],
+        rejected: [],
+        remainingDaily: 30,
+        remainingRun: 2
+      },
+      2
+    ),
+    "run_limit_reached"
+  );
+});
+
+test("allowed candidates equal to current daily capacity reaches daily limit after processing", () => {
+  assert.equal(
+    completionReason(
+      {
+        allow: ["1", "2"],
+        rejected: [],
+        remainingDaily: 2,
+        remainingRun: 30
+      },
+      2
+    ),
+    "daily_limit_reached"
   );
 });

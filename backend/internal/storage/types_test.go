@@ -25,3 +25,16 @@ func TestResultCategoryForMixedDailyReportStatuses(t *testing.T) {
 		}
 	}
 }
+
+func TestPauseStatusForEventUsesPausedNetworkForBackendNetworkError(t *testing.T) {
+	status := PauseStatusForEvent(Event{
+		Kind: EventKindError,
+		Details: map[string]any{
+			"code":   "backend_network_error",
+			"safety": "network",
+		},
+	})
+	if status != RunStatusPausedNetwork {
+		t.Fatalf("expected paused_network, got %s", status)
+	}
+}

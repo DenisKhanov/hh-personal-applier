@@ -107,7 +107,6 @@ func formatCoverLetterApproval(raw json.RawMessage) (Message, error) {
 		Text: strings.Join(lines, "\n"),
 		Buttons: [][]Button{{
 			{Text: "Отправить", Unique: CoverLetterCallbackUnique, Data: "approve|" + payload.VacancyID},
-			{Text: "Изменить", Unique: CoverLetterCallbackUnique, Data: "edit|" + payload.VacancyID},
 			{Text: "Пропустить", Unique: CoverLetterCallbackUnique, Data: "skip|" + payload.VacancyID},
 		}},
 	}, nil

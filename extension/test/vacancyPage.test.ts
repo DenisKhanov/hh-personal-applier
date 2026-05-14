@@ -57,6 +57,18 @@ test("detects success state after click", async () => {
   assert.equal(analyzeVacancyPage(document).state, "success");
 });
 
+test("detects already-applied state before generic success text", () => {
+  const document = parseHTML(`
+    <main>
+      <h1 data-qa="vacancy-title">Go Backend Developer</h1>
+      <div data-qa="vacancy-company-name">Acme Tech</div>
+      <div>Отклик уже отправлен</div>
+    </main>
+  `).document;
+
+  assert.equal(analyzeVacancyPage(document).state, "skipped_already_applied");
+});
+
 test("detects cover-letter modal as a known skip state", async () => {
   const document = await loadFixture("vacancy-cover-letter.html");
 

@@ -3,6 +3,7 @@
 up:
 	docker compose up -d
 	@echo "Postgres running on 127.0.0.1:5432"
+	cd backend && go run ./cmd/server
 
 down:
 	docker compose down

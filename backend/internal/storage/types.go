@@ -128,6 +128,16 @@ func (r Run) IsPaused() bool {
 		r.Status == RunStatusPausedNetwork
 }
 
+func PauseStatusForEvent(event Event) RunStatus {
+	if event.Kind == EventKindCaptcha {
+		return RunStatusPausedCaptcha
+	}
+	if event.Kind == EventKindError && isNetworkSafetyEvent(event) {
+		return RunStatusPausedNetwork
+	}
+	return RunStatusPausedUnknown
+}
+
 type ProcessedStatus string
 
 const (
@@ -282,6 +292,11 @@ type Event struct {
 	Message     string         `json:"message,omitempty"`
 	NonBlocking bool           `json:"nonBlocking,omitempty"`
 	Details     map[string]any `json:"details,omitempty"`
+}
+
+func isNetworkSafetyEvent(event Event) bool {
+	return event.Details["safety"] == "network" ||
+		event.Details["code"] == "backend_network_error"
 }
 
 type CoverLetterLanguage string

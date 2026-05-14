@@ -73,6 +73,9 @@ export function analyzeVacancyPage(root: VacancyRoot): VacancyPageAnalysis {
   if (root.querySelector(HH_VACANCY_SELECTORS.captcha) !== null) {
     return { state: "captcha", ...common };
   }
+  if (isAlreadyApplied(pageText)) {
+    return { state: "skipped_already_applied", ...common };
+  }
   if (isSuccess(root, pageText)) {
     return { state: "success", ...common };
   }
@@ -88,9 +91,6 @@ export function analyzeVacancyPage(root: VacancyRoot): VacancyPageAnalysis {
   }
   if (hasKnownTest(root, pageText)) {
     return { state: "skipped_test", ...common };
-  }
-  if (isAlreadyApplied(pageText)) {
-    return { state: "skipped_already_applied", ...common };
   }
   if (isArchived(root, pageText)) {
     return { state: "skipped_archived", ...common };
