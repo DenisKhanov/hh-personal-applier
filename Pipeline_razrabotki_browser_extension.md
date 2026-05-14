@@ -632,10 +632,10 @@ Backend при `POST /runs/continue` проверяет, что run сущест
 - [x] Content script: при модале «требуется письмо» → request → wait → fill textarea → click submit.
 
 ### Этап 8. Popup polish + run/daily limits + dashboard
-- [ ] Popup показывает: статус (idle/running/paused), сегодня (applied/skipped/errors/remaining), кнопки Start/Stop/Continue.
-- [ ] Настройки: `dailyLimit` (default 100, max 200), `runLimit` (default 25, max 100), `paceMinSeconds`, `paceMaxSeconds`.
-- [ ] Переключатели: skipWithTest, skipExternal, requireCoverLetterApproval, autoApply.
-- [ ] Список последних 10 откликов с кликабельным URL.
+- [x] Popup показывает: статус (idle/running/paused), сегодня (applied/skipped/errors/remaining), кнопки Start/Stop/Continue.
+- [x] Настройки: `dailyLimit` (default 100, max 200), `runLimit` (default 25, max 100), `paceMinSeconds`, `paceMaxSeconds`.
+- [x] Переключатели: skipWithTest, skipExternal, requireCoverLetterApproval, autoApply.
+- [x] Список последних 10 откликов с кликабельным URL.
 - [ ] Acceptance smoke: 1 рабочий день в режиме `requireCoverLetterApproval=true`, без падений, дневной отчёт в Telegram.
 
 ---

@@ -11,7 +11,7 @@
       <header class="topbar">
         <div>
           <h1>HH Personal Applier</h1>
-          <p>Local backend health</p>
+          <p>Local run control</p>
         </div>
         <span id="statusBadge" class="status status-idle">Idle</span>
       </header>
@@ -58,12 +58,85 @@
             <h2>Run</h2>
             <p id="runStatus">Idle</p>
           </div>
+          <span id="runStateBadge" class="run-state run-state-idle">Idle</span>
         </div>
 
-        <div class="actions">
+        <div class="actions three">
           <button id="startButton" type="button" class="primary">Start</button>
+          <button id="continueButton" type="button">Continue</button>
           <button id="stopButton" type="button" class="danger">Stop</button>
         </div>
+      </section>
+
+      <section class="panel stats-panel">
+        <div class="section-title">
+          <h2>Today</h2>
+          <button id="refreshButton" type="button" class="small">Refresh</button>
+        </div>
+        <dl class="stats-grid">
+          <div>
+            <dt>Applied</dt>
+            <dd id="appliedCount">0</dd>
+          </div>
+          <div>
+            <dt>Skipped</dt>
+            <dd id="skippedCount">0</dd>
+          </div>
+          <div>
+            <dt>Errors</dt>
+            <dd id="errorCount">0</dd>
+          </div>
+          <div>
+            <dt>Remaining</dt>
+            <dd id="remainingCount">0</dd>
+          </div>
+        </dl>
+      </section>
+
+      <section class="panel settings-panel">
+        <div class="section-title">
+          <h2>Settings</h2>
+          <button id="saveOwnerSettingsButton" type="button" class="small">Save</button>
+        </div>
+        <div class="settings-grid">
+          <label class="field compact">
+            <span>Daily limit</span>
+            <input id="dailyLimit" type="number" min="1" max="200" step="1" />
+          </label>
+          <label class="field compact">
+            <span>Run limit</span>
+            <input id="runLimit" type="number" min="1" max="100" step="1" />
+          </label>
+          <label class="field compact">
+            <span>Pace min</span>
+            <input id="paceMinSeconds" type="number" min="5" max="60" step="1" />
+          </label>
+          <label class="field compact">
+            <span>Pace max</span>
+            <input id="paceMaxSeconds" type="number" min="5" max="180" step="1" />
+          </label>
+        </div>
+        <label class="toggle">
+          <input id="skipWithTest" type="checkbox" />
+          <span>Skip vacancies with tests</span>
+        </label>
+        <label class="toggle">
+          <input id="skipExternal" type="checkbox" />
+          <span>Skip external responses</span>
+        </label>
+        <label class="toggle">
+          <input id="requireCoverLetterApproval" type="checkbox" />
+          <span>Require Telegram approval for letters</span>
+        </label>
+        <label class="toggle">
+          <input id="autoApply" type="checkbox" />
+          <span>Auto apply without popup confirmation</span>
+        </label>
+      </section>
+
+      <section class="panel recent-panel">
+        <h2>Recent</h2>
+        <ol id="recentList" class="recent-list"></ol>
       </section>
 
       <section id="confirmPanel" class="panel confirm-panel" hidden>

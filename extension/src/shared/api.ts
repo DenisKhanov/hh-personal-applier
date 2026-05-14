@@ -110,12 +110,25 @@ export interface VacancyResultOutcome {
   idempotent: boolean;
 }
 
+export interface ProcessedVacancy {
+  vacancyId: string;
+  runId?: string;
+  status: VacancyResultStatus | "attempting";
+  vacancyTitle?: string;
+  employerName?: string;
+  vacancyUrl?: string;
+  notes?: string;
+  appliedAt?: string;
+  updatedAt: string;
+}
+
 export interface TodayStats {
   applied: number;
   skipped: number;
   errors: number;
   remainingDaily: number;
   activeRun: ApplyRun | null;
+  recentVacancies: ProcessedVacancy[];
 }
 
 export interface SafetyEvent {
@@ -171,6 +184,8 @@ interface BackendErrorBody {
     details?: Record<string, unknown>;
   };
 }
+
+const BACKEND_NETWORK_RETRY_DELAYS_MS = [500, 1000, 2000];
 
 export class BackendApiError extends Error {
   readonly statusCode: number;
@@ -467,7 +482,10 @@ async function requestJSON<T>(
     requestInit.body = JSON.stringify(options.body);
   }
 
-  const response = await fetch(`${backendUrl}${path}`, requestInit);
+  const response = await fetchWithNetworkRetry(
+    `${backendUrl}${path}`,
+    requestInit
+  );
 
   const text = await response.text();
   const body = parseBackendBody(text, response.status);
@@ -483,6 +501,37 @@ async function requestJSON<T>(
   }
 
   return body as T;
+}
+
+async function fetchWithNetworkRetry(
+  input: RequestInfo | URL,
+  init: RequestInit
+): Promise<Response> {
+  let lastError: unknown;
+  for (
+    let attempt = 0;
+    attempt <= BACKEND_NETWORK_RETRY_DELAYS_MS.length;
+    attempt += 1
+  ) {
+    try {
+      return await fetch(input, init);
+    } catch (error) {
+      lastError = error;
+      const delay = BACKEND_NETWORK_RETRY_DELAYS_MS[attempt];
+      if (delay === undefined) {
+        break;
+      }
+      await new Promise((resolve) => globalThis.setTimeout(resolve, delay));
+    }
+  }
+
+  throw new BackendApiError(
+    0,
+    "backend_network_error",
+    lastError instanceof Error
+      ? `Backend network request failed after retries: ${lastError.message}`
+      : "Backend network request failed after retries."
+  );
 }
 
 function parseBackendBody(text: string, statusCode: number): unknown {

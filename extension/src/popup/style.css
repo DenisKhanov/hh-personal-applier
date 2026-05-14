@@ -17,7 +17,7 @@
 }
 
 body {
-  width: 360px;
+  width: 390px;
   margin: 0;
   background: var(--bg);
   color: var(--text);
@@ -95,7 +95,17 @@ p {
   margin-top: 10px;
 }
 
+.stats-panel,
+.settings-panel,
+.recent-panel {
+  margin-top: 10px;
+}
+
 .run-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
   margin-bottom: 10px;
 }
 
@@ -110,6 +120,37 @@ h2 {
   margin-top: 2px;
   color: var(--muted);
   font-size: 12px;
+}
+
+.run-state {
+  flex: 0 0 auto;
+  min-width: 78px;
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #eef3f1;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 760;
+  text-align: center;
+}
+
+.run-state-running {
+  border-color: #94cdbd;
+  background: #e6f5ef;
+  color: var(--ok);
+}
+
+.run-state-paused {
+  border-color: #e5c775;
+  background: #fff6d8;
+  color: var(--warning);
+}
+
+.run-state-stopped {
+  border-color: #d4d9d7;
+  background: #f3f5f4;
+  color: var(--muted);
 }
 
 .field {
@@ -147,6 +188,55 @@ input:focus {
   gap: 8px;
 }
 
+.actions.three {
+  grid-template-columns: 1fr 1fr 1fr;
+}
+
+.section-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin: 0;
+}
+
+.stats-grid div {
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fbfcfc;
+}
+
+dt {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+dd {
+  margin: 2px 0 0;
+  font-size: 16px;
+  font-weight: 760;
+}
+
+.settings-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.field.compact {
+  margin-bottom: 0;
+}
+
 .wide {
   width: 100%;
   margin-top: 8px;
@@ -161,6 +251,12 @@ button {
   font: inherit;
   font-weight: 760;
   cursor: pointer;
+}
+
+button.small {
+  min-height: 30px;
+  padding: 4px 9px;
+  font-size: 12px;
 }
 
 button:hover {
@@ -199,6 +295,69 @@ button:disabled {
   border-left: 3px solid var(--accent);
   background: #ffffff;
   color: var(--muted);
+}
+
+.toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 9px;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.toggle input {
+  width: 16px;
+  min-height: 16px;
+  margin: 0;
+  padding: 0;
+}
+
+.recent-list {
+  display: grid;
+  gap: 8px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.recent-item {
+  min-width: 0;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.recent-item:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.recent-item a {
+  display: block;
+  overflow: hidden;
+  color: var(--accent);
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recent-meta {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.recent-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-top: 7px;
+}
+
+.recent-actions button {
+  min-height: 30px;
+  padding: 4px 7px;
+  font-size: 12px;
 }
 
 .confirm-panel {

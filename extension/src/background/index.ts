@@ -1,5 +1,6 @@
 import {
   BackendApiError,
+  continueRun,
   filterCandidates,
   getCoverLetter,
   getTodayStats,
@@ -25,6 +26,7 @@ import {
   VACANCY_APPLY_SIMPLE_REQUEST,
   VACANCY_SUBMIT_COVER_LETTER_REQUEST,
   isPopupConfirmResponseMessage,
+  isPopupContinueRunMessage,
   isPopupGetStatusMessage,
   isPopupStartRunMessage,
   isPopupStopRunMessage,
@@ -42,6 +44,10 @@ import {
   notificationForContinuableResult,
   shouldNotifyContinuableResult
 } from "../shared/applyResultPolicy";
+import {
+  COVER_LETTER_APPROVAL_TIMEOUT_MS,
+  pollCoverLetterApproval as pollCoverLetterApprovalUntilDecision
+} from "../shared/coverLetterApproval";
 import { isHhSearchVacancyUrl } from "../shared/pageGuards";
 import { completionReason } from "../shared/runPolicy";
 import { sendMessageWithInjection as sendMessageWithInjectedScript } from "../shared/tabMessaging";
@@ -83,7 +89,7 @@ class SafetyStopError extends Error {
   }
 }
 
-const OWNER_CONFIRMATION_TIMEOUT_MS = 30 * 1000;
+const OWNER_CONFIRMATION_TIMEOUT_MS = 2 * 60 * 1000;
 const COVER_LETTER_POLL_MS = 5000;
 const PENDING_OWNER_CONFIRMATION_KEY = "pendingOwnerConfirmation";
 
@@ -183,6 +189,20 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
     return true;
   }
 
+  if (isPopupContinueRunMessage(message)) {
+    void continueFromPopup()
+      .then(sendResponse)
+      .catch((error: unknown) => {
+        logBackgroundError("failed to continue run", error);
+        sendResponse({
+          ...publicStatusSync(),
+          ok: false,
+          error: error instanceof Error ? error.message : "Failed to continue run"
+        });
+      });
+    return true;
+  }
+
   return false;
 });
 
@@ -264,6 +284,34 @@ async function stopFromPopup(): Promise<Record<string, unknown>> {
   state = {
     phase: "idle",
     message: "Stopped by owner"
+  };
+  return { ...publicStatusSync(), ok: true };
+}
+
+async function continueFromPopup(): Promise<Record<string, unknown>> {
+  const settings = await loadBootstrapSettings();
+  const stats = await getTodayStats(settings);
+  const activeRun = stats.activeRun;
+  if (activeRun === null) {
+    return {
+      ...publicStatusSync(),
+      ok: false,
+      error: "No active paused run found."
+    };
+  }
+  if (!isPausedRunStatus(activeRun.status)) {
+    return {
+      ...publicStatusSync(),
+      ok: false,
+      error: `Run is not paused: ${activeRun.status}.`
+    };
+  }
+
+  const run = await continueRun(settings, activeRun.runId);
+  state = {
+    phase: "idle",
+    message: `Continued ${run.runId}; click Start to resume from the active search tab`,
+    runId: run.runId
   };
   return { ...publicStatusSync(), ok: true };
 }
@@ -603,14 +651,12 @@ async function pollCoverLetterApproval(
   vacancyId: string,
   signal: AbortSignal
 ): Promise<CoverLetter> {
-  for (;;) {
-    ensureNotAborted(signal);
-    await abortableDelay(COVER_LETTER_POLL_MS, signal);
-    const letter = await getCoverLetter(settings, vacancyId);
-    if (letter.status !== "pending_approval") {
-      return letter;
-    }
-  }
+  return pollCoverLetterApprovalUntilDecision(vacancyId, signal, {
+    pollMs: COVER_LETTER_POLL_MS,
+    timeoutMs: COVER_LETTER_APPROVAL_TIMEOUT_MS,
+    getCoverLetter: (id) => getCoverLetter(settings, id),
+    delay: abortableDelay
+  });
 }
 
 async function startOrReuseRunningRun(
@@ -798,7 +844,12 @@ async function recordSafetyStop(
 }
 
 async function publicStatus(): Promise<Record<string, unknown>> {
-  return publicStatusSync(await pendingConfirmationForStatus());
+  const settings = await loadBootstrapSettings();
+  const stats = await getTodayStats(settings).catch(() => null);
+  return {
+    ...publicStatusSync(await pendingConfirmationForStatus()),
+    activeRun: stats?.activeRun ?? null
+  };
 }
 
 function publicStatusSync(
@@ -1081,6 +1132,14 @@ function randomPaceMs(settings: ApplyRun["settingsSnapshot"]): number {
   const min = settings.paceMinSeconds * 1000;
   const max = settings.paceMaxSeconds * 1000;
   return Math.floor(min + Math.random() * (max - min + 1));
+}
+
+function isPausedRunStatus(status: ApplyRun["status"]): boolean {
+  return (
+    status === "paused_captcha" ||
+    status === "paused_unknown" ||
+    status === "paused_network"
+  );
 }
 
 function abortableDelay(ms: number, signal: AbortSignal): Promise<void> {

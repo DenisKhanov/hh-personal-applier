@@ -447,8 +447,72 @@ func (s *Store) GetTodayStats(ctx context.Context) (storage.TodayStats, error) {
 		dailyLimit = settings.DailyLimit
 	}
 	stats.RemainingDaily = max(dailyLimit-stats.Applied, 0)
+	recent, err := s.recentProcessedVacancies(ctx, 10)
+	if err != nil {
+		return storage.TodayStats{}, err
+	}
+	stats.RecentVacancies = recent
 
 	return stats, nil
+}
+
+func (s *Store) recentProcessedVacancies(ctx context.Context, limit int) ([]storage.ProcessedVacancy, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT vacancy_id, run_id::text, status, vacancy_title, employer_name, vacancy_url,
+		       notes, applied_at, updated_at
+		FROM processed_vacancies
+		ORDER BY updated_at DESC
+		LIMIT $1`,
+		limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	vacancies := make([]storage.ProcessedVacancy, 0, limit)
+	for rows.Next() {
+		var vacancy storage.ProcessedVacancy
+		var runID sql.NullString
+		var title sql.NullString
+		var employer sql.NullString
+		var url sql.NullString
+		var notes sql.NullString
+		var appliedAt sql.NullTime
+		if err := rows.Scan(
+			&vacancy.VacancyID,
+			&runID,
+			&vacancy.Status,
+			&title,
+			&employer,
+			&url,
+			&notes,
+			&appliedAt,
+			&vacancy.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		if runID.Valid {
+			vacancy.RunID = runID.String
+		}
+		if title.Valid {
+			vacancy.VacancyTitle = title.String
+		}
+		if employer.Valid {
+			vacancy.EmployerName = employer.String
+		}
+		if url.Valid {
+			vacancy.VacancyURL = url.String
+		}
+		if notes.Valid {
+			vacancy.Notes = notes.String
+		}
+		if appliedAt.Valid {
+			vacancy.AppliedAt = appliedAt.Time
+		}
+		vacancies = append(vacancies, vacancy)
+	}
+	return vacancies, rows.Err()
 }
 
 func (s *Store) RecordEvent(ctx context.Context, event storage.Event) error {

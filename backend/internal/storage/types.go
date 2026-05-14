@@ -245,12 +245,25 @@ type VacancyResultOutcome struct {
 	Idempotent bool   `json:"idempotent"`
 }
 
+type ProcessedVacancy struct {
+	VacancyID    string    `json:"vacancyId"`
+	RunID        string    `json:"runId,omitempty"`
+	Status       string    `json:"status"`
+	VacancyTitle string    `json:"vacancyTitle,omitempty"`
+	EmployerName string    `json:"employerName,omitempty"`
+	VacancyURL   string    `json:"vacancyUrl,omitempty"`
+	Notes        string    `json:"notes,omitempty"`
+	AppliedAt    time.Time `json:"appliedAt,omitempty"`
+	UpdatedAt    time.Time `json:"updatedAt"`
+}
+
 type TodayStats struct {
-	Applied        int  `json:"applied"`
-	Skipped        int  `json:"skipped"`
-	Errors         int  `json:"errors"`
-	RemainingDaily int  `json:"remainingDaily"`
-	ActiveRun      *Run `json:"activeRun"`
+	Applied         int                `json:"applied"`
+	Skipped         int                `json:"skipped"`
+	Errors          int                `json:"errors"`
+	RemainingDaily  int                `json:"remainingDaily"`
+	ActiveRun       *Run               `json:"activeRun"`
+	RecentVacancies []ProcessedVacancy `json:"recentVacancies"`
 }
 
 type EventKind string

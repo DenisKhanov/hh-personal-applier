@@ -4,6 +4,7 @@ export const SEARCH_CANDIDATES_PARSED = "HH_SEARCH_CANDIDATES_PARSED";
 export const SEARCH_PARSE_REQUEST = "HH_SEARCH_PARSE_REQUEST";
 export const POPUP_START_RUN = "HH_POPUP_START_RUN";
 export const POPUP_STOP_RUN = "HH_POPUP_STOP_RUN";
+export const POPUP_CONTINUE_RUN = "HH_POPUP_CONTINUE_RUN";
 export const POPUP_GET_STATUS = "HH_POPUP_GET_STATUS";
 export const POPUP_CONFIRM_RESPONSE = "HH_POPUP_CONFIRM_RESPONSE";
 export const VACANCY_APPLY_SIMPLE_REQUEST = "HH_VACANCY_APPLY_SIMPLE_REQUEST";
@@ -33,6 +34,10 @@ export interface PopupStartRunMessage {
 
 export interface PopupStopRunMessage {
   type: typeof POPUP_STOP_RUN;
+}
+
+export interface PopupContinueRunMessage {
+  type: typeof POPUP_CONTINUE_RUN;
 }
 
 export interface PopupGetStatusMessage {
@@ -95,6 +100,7 @@ export type ExtensionMessage =
   | SearchParseRequestMessage
   | PopupStartRunMessage
   | PopupStopRunMessage
+  | PopupContinueRunMessage
   | PopupGetStatusMessage
   | PopupConfirmResponseMessage
   | VacancyApplySimpleRequestMessage
@@ -132,6 +138,12 @@ export function isPopupStopRunMessage(
   message: unknown
 ): message is PopupStopRunMessage {
   return hasType(message, POPUP_STOP_RUN);
+}
+
+export function isPopupContinueRunMessage(
+  message: unknown
+): message is PopupContinueRunMessage {
+  return hasType(message, POPUP_CONTINUE_RUN);
 }
 
 export function isPopupGetStatusMessage(

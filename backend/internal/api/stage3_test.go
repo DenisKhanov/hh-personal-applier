@@ -23,7 +23,7 @@ func TestSettingsHandlersReadAndValidateUpdates(t *testing.T) {
 	}
 	var settings storage.Settings
 	decodeJSON(t, getResponse, &settings)
-	if settings.DailyLimit != 100 || settings.RunLimit != 25 {
+	if settings.DailyLimit != 100 || settings.RunLimit != 25 || !settings.AutoApply {
 		t.Fatalf("unexpected settings: %+v", settings)
 	}
 
@@ -384,6 +384,25 @@ func TestStatsAndEventsHandlers(t *testing.T) {
 		t.Fatalf("unexpected stats: %+v", stats)
 	}
 
+	store.recentVacancies = []storage.ProcessedVacancy{
+		{
+			VacancyID:    "42",
+			Status:       string(storage.ProcessedStatusApplied),
+			VacancyTitle: "Go Developer",
+			EmployerName: "Example LLC",
+			VacancyURL:   "https://hh.ru/vacancy/42",
+			Notes:        "submitted",
+		},
+	}
+	statsResponse = doJSON(t, mux, http.MethodGet, "/stats/today", nil)
+	if statsResponse.Code != http.StatusOK {
+		t.Fatalf("expected stats with recent vacancies 200, got %d: %s", statsResponse.Code, statsResponse.Body.String())
+	}
+	decodeJSON(t, statsResponse, &stats)
+	if len(stats.RecentVacancies) != 1 || stats.RecentVacancies[0].VacancyURL != "https://hh.ru/vacancy/42" {
+		t.Fatalf("expected recent vacancy in stats, got %+v", stats.RecentVacancies)
+	}
+
 	eventResponse := doJSON(t, mux, http.MethodPost, "/events/captcha", map[string]any{
 		"runId":   "run-1",
 		"message": "captcha visible",
@@ -455,6 +474,7 @@ type fakeStore struct {
 	activeRun           *storage.Run
 	processed           map[string]storage.ProcessedStatus
 	processedRun        map[string]string
+	recentVacancies     []storage.ProcessedVacancy
 	events              []storage.Event
 	telegramTestCalls   int
 }
@@ -469,7 +489,7 @@ func newFakeStore() *fakeStore {
 			SkipWithTest:               true,
 			SkipExternal:               true,
 			RequireCoverLetterApproval: true,
-			AutoApply:                  false,
+			AutoApply:                  true,
 		},
 		processed:    make(map[string]storage.ProcessedStatus),
 		processedRun: make(map[string]string),
@@ -633,11 +653,12 @@ func applyFakeCounterDelta(run *storage.Run, oldCategory storage.ResultCategoryV
 
 func (f *fakeStore) GetTodayStats(_ context.Context) (storage.TodayStats, error) {
 	return storage.TodayStats{
-		Applied:        f.activeRun.AppliedCount,
-		Skipped:        f.activeRun.SkippedCount,
-		Errors:         f.activeRun.ErrorCount,
-		RemainingDaily: f.settings.DailyLimit - f.activeRun.AppliedCount,
-		ActiveRun:      f.activeRun,
+		Applied:         f.activeRun.AppliedCount,
+		Skipped:         f.activeRun.SkippedCount,
+		Errors:          f.activeRun.ErrorCount,
+		RemainingDaily:  f.settings.DailyLimit - f.activeRun.AppliedCount,
+		ActiveRun:       f.activeRun,
+		RecentVacancies: f.recentVacancies,
 	}, nil
 }
 

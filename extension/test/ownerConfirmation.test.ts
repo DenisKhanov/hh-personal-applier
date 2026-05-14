@@ -108,7 +108,7 @@ test("request resolves to 'skip' when decide is called with skip", async () => {
   assert.equal(decision, "skip");
 });
 
-test("request auto-confirms on timeout after 30 seconds and logs", async () => {
+test("request auto-confirms on timeout after 2 minutes and logs", async () => {
   const timer = makeFakeTimer();
   const logs: Array<{ message: string; data: Record<string, unknown> }> = [];
   const controller = createOwnerConfirmationController({
@@ -119,8 +119,8 @@ test("request auto-confirms on timeout after 30 seconds and logs", async () => {
     }
   });
 
-  const pending = controller.request(candidate, new AbortController().signal, 30_000);
-  assert.equal(timer.lastDelayMs(), 30_000);
+  const pending = controller.request(candidate, new AbortController().signal, 120_000);
+  assert.equal(timer.lastDelayMs(), 120_000);
 
   timer.fire();
   const decision = await pending;
